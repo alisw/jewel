@@ -1,16 +1,21 @@
 C+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-C++ Copyright (C) 2013 Korinna C. Zapp [Korinna.Zapp@cern.ch]       ++
+C++ Copyright (C) 2017 Korinna C. Zapp [Korinna.Zapp@cern.ch]       ++
 C++                                                                 ++
-C++ This file is part of JEWEL 2.0.2                                ++
+C++ This file is part of JEWEL 2.2.0                                ++
 C++                                                                 ++
 C++ The JEWEL homepage is jewel.hepforge.org                        ++
 C++                                                                 ++
-C++ The medium model was partly implemented by Jochen Klein         ++
+C++ The medium model was partly implemented by Jochen Klein.        ++
+C++ Raghav Kunnawalkam Elayavalli helped with the implementation    ++
+C++ of the V+jet processes.                                         ++
 C++                                                                 ++
-C++ Please follow the MCnet GUIDELINES and cite arXiv:1311.0048     ++
-C++ for the code and JHEP 1303 (2013) 080 [arXiv:1212.1599] and     ++
-C++ optionally EPJC C60 (2009) 617 [arXiv:0804.3568] for the        ++
-C++ physics.                                                        ++
+C++ Please follow the MCnet GUIDELINES and cite Eur.Phys.J. C74     ++
+C++ (2014) no.2, 2762 [arXiv:1311.0048] for the code and            ++
+C++ JHEP 1303 (2013) 080 [arXiv:1212.1599] and                      ++
+C++ optionally EPJC 60 (2009) 617 [arXiv:0804.3568] for the         ++
+C++ physics. The reference for V+jet processes is EPJC 76 (2016)    ++
+C++ no.12 695 [arXiv:1608.03099] and for recoil effects it is       ++
+C++ arXiv:1707.01539.
 C++                                                                 ++
 C++ JEWEL relies heavily on PYTHIA 6 for the event generation. The  ++
 C++ modified version of PYTHIA 6.4.25 that is distributed with      ++
@@ -77,6 +82,23 @@ C--Common block of Pythia
 C--identifier of file for hepmc output and logfile
 	common/hepmcid/hpmcfid,logfid
 	integer hpmcfid,logfid
+C--use nuclear pdf?      
+      COMMON/NPDF/MASS,NSET,EPS09,INITSTR
+      INTEGER NSET
+      DOUBLE PRECISION MASS
+      LOGICAL EPS09
+      CHARACTER*10 INITSTR
+C--number of protons
+	common/np/nproton
+	integer nproton
+C--organisation of event record
+	common/evrecord/nsim,npart,offset,hadrotype,sqrts,collider,hadro,
+     &shorthepmc,channel,isochannel
+	integer nsim,npart,offset,hadrotype
+	double precision sqrts
+	character*4 collider,channel
+	character*2 isochannel
+	logical hadro,shorthepmc
 C--discard event flag
 	COMMON/DISC/NDISC,NSTRANGE,NGOOD,errcount,wdisc,DISCARD
 	LOGICAL DISCARD
@@ -94,14 +116,129 @@ C--number of extrapolations in tables
 	integer ntotspliti,noverspliti,ntotpdf,noverpdf,
      &ntotxsec,noverxsec,ntotsuda,noversuda
 C--local variables
-	integer j,nsim,init,i
+	integer j,i,kk,poissonian
+      integer nsimpp,nsimpn,nsimnp,nsimnn,nsimsum,nsimchn
+	double precision sumofweightstot,wdisctot,scalefac
 	double precision gettemp,r,tau
+	character*2 b1,b2
 
-	nsim=init()
+	call init()
+
+	SUMOFWEIGHTSTOT=0.d0
+      WDISCTOT=0.d0
+
+C--e+ + e- event generation
+	if (collider.eq.'EEJJ') then
+	  b1 = 'e+'
+	  b2 = 'e-'
+	  write(logfid,*)
+	  write(logfid,*)
+     &'####################################################'
+	  write(logfid,*)
+	  write(logfid,*)'generating ',nsim,' events in ',b1,' + ',b2,
+     &' channel'
+	  write(logfid,*)
+	  write(logfid,*)
+     &'####################################################'
+	  write(logfid,*)
+	  SUMOFWEIGHTS=0.d0
+        WDISC=0.d0
+	  call initpythia(b1,b2)
+	    write(logfid,*)
+C--e+ + e- event loop
+	  DO 100 J=1,NSIM
+	    call genevent(j,b1,b2)
+ 100	  CONTINUE
+	  sumofweightstot = sumofweightstot+sumofweights
+	  wdisctot = wdisctot + wdisc
+	  write(logfid,*)
+	  write(logfid,*)'cross section in e+ + e- channel:',PARI(1),'mb'
+	  write(logfid,*)'sum of event weights in e+ + e- channel:',
+     &	sumofweights-wdisc
+	  write(logfid,*)
+
+	else
+C--hadronic event generation
+	  if (isochannel.eq.'PP') then
+	    nsimpp = nsim
+	    nsimpn = 0
+	    nsimnp = 0
+	    nsimnn = 0
+	  elseif (isochannel.eq.'PN') then
+	    nsimpp = 0
+	    nsimpn = nsim
+	    nsimnp = 0
+	    nsimnn = 0
+	  elseif (isochannel.eq.'NP') then
+	    nsimpp = 0
+	    nsimpn = 0
+	    nsimnp = nsim
+	    nsimnn = 0
+	  elseif (isochannel.eq.'NN') then
+	    nsimpp = 0
+	    nsimpn = 0
+	    nsimnp = 0
+	    nsimnn = nsim
+	  else
+	    nsimpp = poissonian(nsim*nproton**2/mass**2)
+	    nsimpn = poissonian(nsim*nproton*(mass-nproton*1.d0)/mass**2)
+	    nsimnp = poissonian(nsim*nproton*(mass-nproton*1.d0)/mass**2)
+	    nsimnn = poissonian(nsim*(mass-nproton*1.d0)**2/mass**2)
+	    nsimsum = nsimpp + nsimpn + nsimnp + nsimnn
+	    scalefac = nsim*1.d0/(nsimsum*1.d0)
+	    nsimpp = int(nsimpp*scalefac)
+	    nsimpn = int(nsimpn*scalefac)
+	    nsimnp = int(nsimnp*scalefac)
+	    nsimnn = int(nsimnn*scalefac)
+	    nsimsum = nsimpp + nsimpn + nsimnp + nsimnn
+	  endif
+C--loop over channels
+	  do 101 kk=1,4
+	    if (kk.eq.1) then
+	      b1 = 'p+'
+	      b2 = 'p+'
+	      nsimchn = nsimpp
+	    elseif (kk.eq.2) then
+	      b1 = 'p+'
+	      b2 = 'n0'
+	      nsimchn = nsimpn
+	    elseif (kk.eq.3) then
+	      b1 = 'n0'
+	      b2 = 'p+'
+	      nsimchn = nsimnp
+	    else
+	      b1 = 'n0'
+	      b2 = 'n0'
+	      nsimchn = nsimnn
+	    endif
+	    write(logfid,*)
+	    write(logfid,*)
+     &'####################################################'
+	    write(logfid,*)
+	    write(logfid,*)'generating ',nsimchn,' events in ',
+     &b1,' + ',b2,' channel'
+	    write(logfid,*)
+	    write(logfid,*)
+     &'####################################################'
+	    write(logfid,*)
+	    SUMOFWEIGHTS=0.d0
+          WDISC=0.d0
+	    call initpythia(b1,b2)
+	    write(logfid,*)
 C--event loop
-	DO 100 J=1,NSIM
-	  call genevent(j)
- 100	CONTINUE
+	    DO 102 J=1,nsimchn
+	      call genevent(j,b1,b2)
+ 102	    CONTINUE
+	    sumofweightstot = sumofweightstot+sumofweights
+	    wdisctot = wdisctot + wdisc
+	    write(logfid,*)
+	    write(logfid,*)'cross section in ',b1,' + ',b2,' channel:',
+     &	PARI(1),'mb'
+	    write(logfid,*)'sum of event weights in ',b1,' + ',b2,
+     &	' channel:',sumofweights-wdisc
+	    write(logfid,*)
+ 101	  continue
+	endif
  
 C--finish
 	WRITE(HPMCFID,'(A)')'HepMC::IO_GenEvent-END_EVENT_LISTING'
@@ -110,11 +247,11 @@ C--finish
 
 	write(logfid,*)
 	write(logfid,*)'mean number of scatterings:',
-     &      NSCAT/(SUMOFWEIGHTS-WDISC)
+     &      NSCAT/(SUMOFWEIGHTSTOT-WDISCTOT)
 	write(logfid,*)'mean number of effective scatterings:',
-     &      NSCATEFF/(SUMOFWEIGHTS-WDISC)
+     &      NSCATEFF/(SUMOFWEIGHTSTOT-WDISCTOT)
 	write(logfid,*)'mean number of splittings:',
-     &      NSPLIT/(SUMOFWEIGHTS-WDISC)
+     &      NSPLIT/(SUMOFWEIGHTSTOT-WDISCTOT)
 	write(logfid,*)
 	write(logfid,*)'number of extrapolations in splitting integral: ',
      &	noverspliti,' (',(noverspliti*1.d0)/(ntotspliti*1.d0),'%)'
@@ -132,10 +269,6 @@ C--finish
 	write(logfid,*)'total number of discarded events: ',NDISC
 	write(logfid,*)'number of events for which conversion '//
      &'to hepmc failed: ',NSTRANGE
-
-	write(logfid,*)'cross section:',PARI(1),'mb'
-	write(logfid,*)'sum of event weights:',sumofweights-wdisc
-
 	call printtime
 
 	close(logfid,status='keep')
@@ -152,9 +285,9 @@ C--finish
 
 
 ***********************************************************************
-***	  function init
+***	  subroutine init
 ***********************************************************************
-	integer function init()
+	subroutine init()
 	implicit none
 	INTEGER PYCOMP
 	INTEGER NMXHEP
@@ -183,6 +316,12 @@ C--use nuclear pdf?
       DOUBLE PRECISION MASS
       LOGICAL EPS09
       CHARACTER*10 INITSTR
+C--pdfset
+	common/pdf/pdfset
+	integer pdfset
+C--number of protons
+	common/np/nproton
+	integer nproton
 C--Parameter common block
 	COMMON/PARAM/Q0,LPS,LQCD,LTIME,SCALEFACM,ANGORD,SCATRECOIL,
      &ALLHAD,compress,NF
@@ -208,9 +347,9 @@ C--Sudakov common block
      &,SUDAGC(1000,2)
 	DOUBLE PRECISION SUDAQQ,SUDAQG,SUDAGG,SUDAGC
 C--exponential integral for negative arguments
-      COMMON/EXPINT/EIXS(3,1000),VALMAX,NVAL
+      COMMON/EXPINT/EIX(3,1000),VALMAX,NVAL
       INTEGER NVAL
-      DOUBLE PRECISION EIXS,VALMAX
+      DOUBLE PRECISION EIX,VALMAX
 C--discard event flag
 	COMMON/DISC/NDISC,NSTRANGE,NGOOD,errcount,wdisc,DISCARD
 	LOGICAL DISCARD
@@ -247,22 +386,35 @@ C--memory for error message from getdeltat
 	integer errl
 C--organisation of event record
 	common/evrecord/nsim,npart,offset,hadrotype,sqrts,collider,hadro,
-     &shorthepmc
+     &shorthepmc,channel,isochannel
 	integer nsim,npart,offset,hadrotype
 	double precision sqrts
-	character*4 collider
+	character*4 collider,channel
+	character*2 isochannel
 	logical hadro,shorthepmc
+C--extra storage for scattering centres before interactions
+      common/storescatcen/nscatcen,maxnscatcen,scatflav(10000),
+     &scatcen(10000,5),writescatcen,writedummies
+	integer nscatcen,maxnscatcen,scatflav
+	double precision scatcen
+	logical writescatcen,writedummies
+C--Pythia parameters
+	common/pythiaparams/PTMIN,PTMAX,weighted
+	double precision PTMIN,PTMAX
+	LOGICAL WEIGHTED
 
 C--Variables local to this program
-	INTEGER NJOB,PDFSET,ios,pos,i,j,jj
-	DOUBLE PRECISION PTMIN,PTMAX,GETLTIMEMAX,EOVEST,r,pyr
+	INTEGER NJOB,ios,pos,i,j,jj,intmass
+	DOUBLE PRECISION GETLTIMEMAX,EOVEST,r,pyr
 	character firstchar
 	CHARACTER*2 SNSET
       CHARACTER*80 PDFFILE,XSECFILE,FILEMED,FILESPLIT,buffer,
      &label,value
       CHARACTER*100 HEPMCFILE,LOGFILE,FILENAME2
 	CHARACTER(LEN=100) filename
-	LOGICAL PDFEXIST,SPLITIEXIST,XSECEXIST,WEIGHTED
+	LOGICAL PDFEXIST,SPLITIEXIST,XSECEXIST
+
+	data maxnscatcen/10000/
 
       HPMCFID = 4
 	logfid = 3
@@ -283,10 +435,13 @@ C--default settings
 	ptmax = 350.
 	etamax = 3.1
 	collider = 'PPJJ'
+	isochannel = 'XX'
+	channel = 'MUON'
 	sqrts = 2760
 	pdfset = 10042
 	nset = 1
 	mass = 208.
+      nproton = 82
 	weighted = .true.
 	weightex = 5.
 	angord = .true.
@@ -295,6 +450,8 @@ C--default settings
 	hadrotype = 0
 	shorthepmc = .true.
 	compress = .true.
+	writescatcen = .false.
+	writedummies = .false.
 	
 	lps = lqcd
 	scatrecoil = .false.
@@ -349,6 +506,10 @@ C--default settings
             read(value,*,iostat=ios) etamax
           elseif(label.eq."PROCESS")then
             read(value,*,iostat=ios) collider
+          elseif(label.eq."ISOCHANNEL")then
+            read(value,*,iostat=ios) isochannel
+	    elseif(label.eq."CHANNEL")then
+	    read(value,*,iostat=ios) channel
           elseif(label.eq."SQRTS")then
             read(value,*,iostat=ios) sqrts
           elseif(label.eq."PDFSET")then
@@ -357,6 +518,8 @@ C--default settings
             read(value,*,iostat=ios) nset
           elseif(label.eq."MASS")then
             read(value,*,iostat=ios) mass
+          elseif(label.eq."NPROTON")then
+            read(value,*,iostat=ios) nproton
           elseif(label.eq."WEIGHTED")then
             read(value,*,iostat=ios) weighted
           elseif(label.eq."WEXPO")then
@@ -373,6 +536,10 @@ C--default settings
             read(value,*,iostat=ios) shorthepmc
           elseif(label.eq."COMPRESS")then
             read(value,*,iostat=ios) compress
+          elseif(label.eq."WRITESCATCEN")then
+            read(value,*,iostat=ios) writescatcen
+          elseif(label.eq."WRITEDUMMIES")then
+            read(value,*,iostat=ios) writedummies
 	    else
 	      write(*,*)'unknown label ',label
 	    endif
@@ -388,6 +555,7 @@ C--default settings
 	endif
 
 	if (ptmin.lt.3.d0) ptmin = 3.d0
+	if (.not.writescatcen) writedummies = .false.
 
 	OPEN(unit=logfid,file=LOGFILE,status='unknown')
 	MSTU(11)=logfid
@@ -413,10 +581,13 @@ C--default settings
 	write(logfid,*)'PTMAX        = ',ptmax
 	write(logfid,*)'ETAMAX       = ',etamax
 	write(logfid,*)'PROCESS      = ',collider
+	write(logfid,*)'ISOCHANNEL   = ',isochannel
+	write(logfid,*)'CHANNEL      = ',channel
 	write(logfid,*)'SQRTS        = ',sqrts
 	write(logfid,*)'PDFSET       = ',pdfset
 	write(logfid,*)'NSET         = ',nset
 	write(logfid,*)'MASS         = ',mass
+	write(logfid,*)'NPROTON      = ',nproton
 	write(logfid,*)'WEIGHTED     = ',weighted
 	write(logfid,*)'WEXPO        = ',weightex
 	write(logfid,*)'ANGORD       = ',angord
@@ -425,17 +596,26 @@ C--default settings
 	write(logfid,*)'HADROTYPE    = ',hadrotype
 	write(logfid,*)'SHORTHEPMC   = ',shorthepmc
 	write(logfid,*)'COMPRESS     = ',compress
+	write(logfid,*)'WRITESCATCEN = ',writescatcen
+	write(logfid,*)'WRITEDUMMIES = ',writedummies
 	write(logfid,*)
 	call flush(logfid)
 
-	if ((collider.ne.'PPJJ').and.(collider.ne.'EEJJ')) then
+	if ((collider.ne.'PPJJ').and.(collider.ne.'EEJJ')
+     &	.and.(collider.ne.'PPYJ').and.(collider.ne.'PPYQ')
+     &	.and.(collider.ne.'PPYG')
+     &	.and.(collider.ne.'PPZJ').and.(collider.ne.'PPZQ')
+     &	.and.(collider.ne.'PPZG').and.(collider.ne.'PPWJ')
+     &	.and.(collider.ne.'PPWQ').and.(collider.ne.'PPWG')
+     &      .and.(collider.ne.'PPDY')) then
 	  write(logfid,*)'Fatal error: colliding system unknown, '//
      &	'will exit now'
 	  call exit(1)
 	endif
 
 C--initialize medium
-      CALL MEDINIT(FILEMED,logfid,etamax)
+	intmass = int(mass)
+      CALL MEDINIT(FILEMED,logfid,etamax,intmass)
       CALL MEDNEXTEVT
 
 	OPEN(unit=HPMCFID,file=HEPMCFILE,status='unknown')
@@ -451,57 +631,6 @@ C--initialize medium
 	  EOVEST=sqrts/2.
 	endif
 
-	IF(NSET.EQ.0)THEN
-	 EPS09=.FALSE.
-	ELSE
-	 EPS09=.TRUE.
-	 IF(NSET.LT.10)THEN
-	  WRITE(SNSET,'(i1)') NSET
-	 ELSE
-	  WRITE(SNSET,'(i2)') NSET
-	 ENDIF
-	  INITSTR='EPS09LO,'//SNSET
-	ENDIF 
-
-C--initialise PYTHIA
-C--no multiple interactions
-	 MSTP(81) = 0
-C--switch off final state radiation
-	 MSTP(71)=0
-C--No hadronisation
-       MSTP(111)=0
-C--Min shat in simulation
-       CKIN(1)=2.      
-C--pT-cut
-       CKIN(3)=PTMIN
-       CKIN(4)=PTMAX
-C--use LHAPDF
-	 MSTP(52)=2
-C--choose pdf: CTEQ6ll (LO fit/LO alphas) - 10042
-C	         MSTW2008 (LO central) - 21000
-	 MSTP(51)=PDFSET
-C--All QCD processes are active
-       MSEL=1
-C--weighted events
-       IF(WEIGHTED) MSTP(142)=1
-
-C--number of errors to be printed
-	 MSTU(22)=MAX(10,INT(5.*NSIM/100.))
-
-C--number of lines in event record
-	MSTU(4)=23000
-	MSTU(5)=23000
-
-C--switch off pi0 decay
-      MDCY(PYCOMP(111),1)=0
-C--initialisation call
-	 IF(COLLIDER.EQ.'EEJJ')THEN
-	  OFFSET=9
-        CALL PYINIT('CMS','e+','e-',sqrts)
-	 ELSE
-	  OFFSET=8
-        CALL PYINIT('CMS','p','p',sqrts)
-       ENDIF
   
 	CALL EIXINT
 	CALL INSUDAINT(EOVEST)
@@ -612,15 +741,12 @@ C--initialise random number generator status
 C--Call PYR once for initialization
 	R=PYR(0)
 
-      WDISC=0.d0
 	NDISC=0
       NGOOD=0
       NSTRANGE=0
       
 	ERRCOUNT=0
 	errl = 0
-
-	SUMOFWEIGHTS=0.d0
 
 	NSCAT=0.d0
 	NSCATEFF=0.d0
@@ -635,7 +761,218 @@ C--Call PYR once for initialization
 	ntotsuda=0
 	noversuda=0
 
-	init=nsim
+	IF(NSET.EQ.0)THEN
+	 EPS09=.FALSE.
+	ELSE
+	 EPS09=.TRUE.
+	 IF(NSET.LT.10)THEN
+	  WRITE(SNSET,'(i1)') NSET
+	 ELSE
+	  WRITE(SNSET,'(i2)') NSET
+	 ENDIF
+	  INITSTR='EPS09LO,'//SNSET
+	ENDIF 
+
+	end
+
+
+
+***********************************************************************
+***	  subroutine initpythia
+***********************************************************************
+	subroutine initpythia(beam1,beam2)
+	implicit none
+	INTEGER PYCOMP
+	INTEGER NMXHEP
+C--Common block of Pythia
+      COMMON/PYJETS/N,NPAD,K(23000,5),P(23000,5),V(23000,5)
+	INTEGER N,NPAD,K
+	DOUBLE PRECISION P,V
+      COMMON/PYDAT1/MSTU(200),PARU(200),MSTJ(200),PARJ(200)
+	INTEGER MSTU,MSTJ
+	DOUBLE PRECISION PARU,PARJ
+      COMMON/PYDAT3/MDCY(500,3),MDME(8000,2),BRAT(8000),KFDP(8000,5)
+	INTEGER MDCY,MDME,KFDP
+	DOUBLE PRECISION BRAT
+      COMMON/PYSUBS/MSEL,MSELPD,MSUB(500),KFIN(2,-40:40),CKIN(200)
+	INTEGER MSEL,MSELPD,MSUB,KFIN
+	DOUBLE PRECISION CKIN 
+      COMMON/PYPARS/MSTP(200),PARP(200),MSTI(200),PARI(200)
+	INTEGER MSTP,MSTI
+	DOUBLE PRECISION PARP,PARI
+      COMMON/PYDATR/MRPY(6),RRPY(100)
+	INTEGER MRPY
+	DOUBLE PRECISION RRPY
+C--use nuclear pdf?      
+      COMMON/NPDF/MASS,NSET,EPS09,INITSTR
+      INTEGER NSET
+      DOUBLE PRECISION MASS
+      LOGICAL EPS09
+      CHARACTER*10 INITSTR
+C--pdfset
+	common/pdf/pdfset
+	integer pdfset
+C--Parameter common block
+	COMMON/PARAM/Q0,LPS,LQCD,LTIME,SCALEFACM,ANGORD,SCATRECOIL,
+     &ALLHAD,compress,NF
+      INTEGER NF
+	DOUBLE PRECISION Q0,LQCD,LTIME,LPS,SCALEFACM
+      LOGICAL ANGORD,SCATRECOIL,ALLHAD,compress
+C--discard event flag
+	COMMON/DISC/NDISC,NSTRANGE,NGOOD,errcount,wdisc,DISCARD
+	LOGICAL DISCARD
+	INTEGER NDISC,NSTRANGE,NGOOD,errcount
+	double precision wdisc
+C--event weight
+	COMMON/WEIGHT/EVWEIGHT,sumofweights
+	double precision EVWEIGHT,sumofweights
+C--event weight exponent
+	COMMON/WEXPO/WEIGHTEX
+	DOUBLE PRECISION WEIGHTEX
+C--memory for error message from getdeltat
+	common/errline/errl
+	integer errl
+C--organisation of event record
+	common/evrecord/nsim,npart,offset,hadrotype,sqrts,collider,hadro,
+     &shorthepmc,channel,isochannel
+	integer nsim,npart,offset,hadrotype
+	double precision sqrts
+	character*4 collider,channel
+	character*2 isochannel
+	logical hadro,shorthepmc
+C--Pythia parameters
+	common/pythiaparams/PTMIN,PTMAX,weighted
+	double precision PTMIN,PTMAX
+	LOGICAL WEIGHTED
+
+C--Variables local to this program
+	character*2 beam1,beam2
+
+
+C--initialise PYTHIA
+C--no multiple interactions
+	 MSTP(81) = 0
+C--initial state radiation
+	 MSTP(61)=1
+C--switch off final state radiation
+	 MSTP(71)=0
+C--No hadronisation (yet)
+       MSTP(111)=0
+C--parameter affecting treatment of string corners
+       PARU(14)=1.
+C--Min shat in simulation
+       CKIN(1)=2.      
+C--pT-cut
+       CKIN(3)=PTMIN
+       CKIN(4)=PTMAX
+C--use LHAPDF
+	 MSTP(52)=2
+C--choose pdf: CTEQ6ll (LO fit/LO alphas) - 10042
+C	         MSTW2008 (LO central) - 21000
+	 MSTP(51)=PDFSET
+	 IF(COLLIDER.EQ.'PPYQ')THEN
+	  MSEL=0
+	  MSUB(29)=1
+	 ELSEIF(COLLIDER.EQ.'PPYG')THEN
+	  MSEL=0
+	  MSUB(14)=1
+	  MSUB(115)=1
+	 ELSEIF(COLLIDER.EQ.'PPYJ')THEN
+	  MSEL=0
+	  MSUB(14)=1
+	  MSUB(29)=1
+	  MSUB(115)=1
+	 ELSEIF((COLLIDER.EQ.'PPZJ').or.(COLLIDER.EQ.'PPZQ')
+     &	.or.(COLLIDER.EQ.'PPZG')
+     &      .or.(collider.eq.'PPDY'))THEN
+	  MSEL=0
+	  IF((COLLIDER.EQ.'PPZJ').or.(COLLIDER.EQ.'PPZQ')) MSUB(30)=1
+	  IF((COLLIDER.EQ.'PPZJ').or.(COLLIDER.EQ.'PPZG')) MSUB(15)=1
+	  IF(COLLIDER.EQ.'PPDY') MSUB(1)=1
+	  MDME(174,1)=0          !Z decay into d dbar', 
+	  MDME(175,1)=0          !Z decay into u ubar', 
+	  MDME(176,1)=0          !Z decay into s sbar', 
+	  MDME(177,1)=0          !Z decay into c cbar', 
+	  MDME(178,1)=0          !Z decay into b bbar', 
+	  MDME(179,1)=0          !Z decay into t tbar', 
+	  MDME(182,1)=0          !Z decay into e- e+', 
+	  MDME(183,1)=0          !Z decay into nu_e nu_ebar', 
+	  MDME(184,1)=0          !Z decay into mu- mu+', 
+	  MDME(185,1)=0          !Z decay into nu_mu nu_mubar', 
+	  MDME(186,1)=0          !Z decay into tau- tau+', 
+	  MDME(187,1)=0          !Z decay into nu_tau nu_taubar',
+	  if (channel.EQ.'ELEC')THEN
+	    MDME(182,1)=1
+	  ELSEIF(channel.EQ.'MUON')THEN
+	    MDME(184,1)=1
+	  ENDIF
+	 ELSEIF((COLLIDER.EQ.'PPWJ').or.(COLLIDER.EQ.'PPWQ')
+     &	.or.(COLLIDER.EQ.'PPWG'))THEN
+	  MSEL=0
+	  IF((COLLIDER.EQ.'PPWJ').or.(COLLIDER.EQ.'PPWQ')) MSUB(31)=1
+	  IF((COLLIDER.EQ.'PPWJ').or.(COLLIDER.EQ.'PPWG')) MSUB(16)=1
+	  MDME(190,1)=0          ! W+ decay into dbar u,
+	  MDME(191,1)=0          ! W+ decay into dbar c,
+	  MDME(192,1)=0          ! W+ decay into dbar t,
+	  MDME(194,1)=0          ! W+ decay into sbar u,
+	  MDME(195,1)=0          ! W+ decay into sbar c,
+	  MDME(196,1)=0          ! W+ decay into sbar t,
+	  MDME(198,1)=0          ! W+ decay into bbar u,
+	  MDME(199,1)=0          ! W+ decay into bbar c,
+	  MDME(200,1)=0          ! W+ decay into bbar t,
+	  MDME(202,1)=0          ! W+ decay into b'bar u,
+	  MDME(203,1)=0          ! W+ decay into b'bar c,
+	  MDME(204,1)=0          ! W+ decay into b'bar t,
+	  MDME(206,1)=0          ! W+ decay into e+ nu_e,
+	  MDME(207,1)=0          ! W+ decay into mu+ nu_mu,
+	  MDME(208,1)=0          ! W+ decay into tau+ nu_tau,
+	  MDME(209,1)=0      ! W+ decay into tau'+ nu'_tau,
+	  if (channel.EQ.'ELEC')THEN
+	   MDME(206,1)=1
+	  ELSEIF(channel.EQ.'MUON')THEN
+	   MDME(207,1)=1
+	  ENDIF
+	 ELSE
+C--All QCD processes are active
+        MSEL=1
+	 ENDIF
+!	 MSEL=0
+!	 MSUB(11)=1
+!	 MSUB(12)=1
+!	 MSUB(53)=1
+!	 MSUB(13)=1
+!	 MSUB(68)=1
+!	 MSUB(28)=1
+
+C--weighted events
+       IF(WEIGHTED) MSTP(142)=1
+
+C--number of errors to be printed
+	 MSTU(22)=MAX(10,INT(5.*NSIM/100.))
+
+C--number of lines in event record
+	MSTU(4)=23000
+	MSTU(5)=23000
+
+C--switch off pi0 decay
+      MDCY(PYCOMP(111),1)=0
+C--initialisation call
+	 IF(COLLIDER.EQ.'EEJJ')THEN
+	  OFFSET=9
+	  CALL PYINIT('CMS',beam1,beam2,sqrts)
+	 ELSEIF((COLLIDER.EQ.'PPJJ').OR.(COLLIDER.EQ.'PPYJ').OR.
+     & 		(COLLIDER.EQ.'PPYG').OR.(COLLIDER.EQ.'PPYQ'))THEN
+	  OFFSET=8
+	  CALL PYINIT('CMS',beam1,beam2,sqrts)
+	 ELSEIF((COLLIDER.EQ.'PPWJ').OR.(COLLIDER.EQ.'PPZJ').or.
+     &	(COLLIDER.EQ.'PPWQ').OR.(COLLIDER.EQ.'PPZQ').or.
+     &	(COLLIDER.EQ.'PPWG').OR.(COLLIDER.EQ.'PPZG'))THEN
+	  OFFSET=10
+	  CALL PYINIT('CMS',beam1,beam2,sqrts)
+	 elseif (collider.eq.'PPDY') then
+	  CALL PYINIT('CMS',beam1,beam2,sqrts)
+	 ENDIF
+
 	end
 
 
@@ -643,7 +980,7 @@ C--Call PYR once for initialization
 ***********************************************************************
 ***	  subroutine genevent
 ***********************************************************************
-	subroutine genevent(j)
+	subroutine genevent(j,b1,b2)
 	implicit none
 C--identifier of file for hepmc output and logfile
 	common/hepmcid/hpmcfid,logfid
@@ -705,21 +1042,35 @@ C--event weight exponent
 C--max rapidity
 	common/rapmax/etamax
 	double precision etamax
+C--production point
+	common/jetpoint/x0,y0
+	double precision x0,y0
 C--organisation of event record
 	common/evrecord/nsim,npart,offset,hadrotype,sqrts,collider,hadro,
-     &shorthepmc
+     &shorthepmc,channel,isochannel
 	integer nsim,npart,offset,hadrotype
 	double precision sqrts
-	character*4 collider
+	character*4 collider,channel
+	character*2 isochannel
 	logical hadro,shorthepmc
+C--extra storage for scattering centres before interactions
+      common/storescatcen/nscatcen,maxnscatcen,scatflav(10000),
+     &scatcen(10000,5),writescatcen,writedummies
+	integer nscatcen,maxnscatcen,scatflav
+	double precision scatcen
+	logical writescatcen,writedummies
 
 C--Variables local to this program
-	INTEGER NOLD,PID,IPART,LME1,LME2,j,i
+	INTEGER NOLD,PID,IPART,LME1,LME2,j,i,LME1ORIG,LME2ORIG,llep1,
+     &llep2,lv
 	DOUBLE PRECISION PYR,ENI,QMAX1,R,GETMASS,PYP,Q1,Q2,P21,P22,ETOT,
-     &QMAX2,POLD,EN1,EN2,BETA(3),ENEW1,ENEW2,emax,lambda,x0,y0,x1,x2,x3,
-     &MEWEIGHT,PSWEIGHT,WEIGHT,EPS1,EPS2,THETA1,THETA2,Z1,Z2,getltimemax
+     &QMAX2,POLD,EN1,EN2,BETA(3),ENEW1,ENEW2,emax,lambda,x1,x2,x3,
+     &MEWEIGHT,PSWEIGHT,WEIGHT,EPS1,EPS2,THETA1,THETA2,Z1,Z2,
+     &getltimemax,pi,m1,m2
+	character*2 b1,b2
 	CHARACTER*2 TYPE1,TYPE2
 	LOGICAL FIRSTTRIP,WHICH1,WHICH2,ISDIQUARK
+	DATA PI/3.141592653589793d0/
 
 	 N=0
 	 COLMAX=600
@@ -731,6 +1082,7 @@ C--Variables local to this program
         MV(I,4)=0.d0
         MV(I,5)=0.d0
  91    CONTINUE
+	 nscatcen = 0
 
        CALL MEDNEXTEVT
 
@@ -751,16 +1103,45 @@ C--production vertex
 	   NGOOD=NGOOD+1
 	  ENDIF 
 
-C--prepare event record
+C--DY: don't have to do anything
+	  if (collider.eq.'PPDY') then
+	    CALL PYEXEC
+	    call CONVERTTOHEPMC(HPMCFID,NGOOD,PID,b1,b2)
+	    goto 102
+	  endif
+
+
+C--   prepare event record
+	  if((COLLIDER.EQ.'PPZJ').OR.(COLLIDER.EQ.'PPZQ').or.
+     &	(COLLIDER.EQ.'PPZG').or.(COLLIDER.EQ.'PPWJ').or.
+     &	(COLLIDER.EQ.'PPWQ').or.(COLLIDER.EQ.'PPWG'))THEN 
+             LME1ORIG=7
+             LME2ORIG=8
+	       if(abs(k(7,2)).gt.21) then
+	         lv=7
+		 else
+	         lv=8
+	       endif
+          ELSE
+             LME1ORIG=OFFSET-1
+             LME2ORIG=OFFSET
+          ENDIF
         DO 180 IPART=OFFSET+1, OFFSET+NPART
-         IF(K(IPART,3).EQ.(OFFSET-1))THEN
+C--find decay leptons in V+jet events
+	  if((COLLIDER.EQ.'PPZJ').OR.(COLLIDER.EQ.'PPZQ').or.
+     &	(COLLIDER.EQ.'PPZG').or.(COLLIDER.EQ.'PPWJ').or.
+     &	(COLLIDER.EQ.'PPWQ').or.(COLLIDER.EQ.'PPWG'))THEN 
+	     if(k(ipart,3).eq.offset-1) llep1=ipart
+	     if(k(ipart,3).eq.offset) llep2=ipart
+	   endif
+         IF(K(IPART,3).EQ.(LME1ORIG))THEN
           LME1=IPART
 	    IF(K(IPART,2).EQ.21)THEN
 	     TYPE1='GC'
 	    ELSE
 	     TYPE1='QQ'
 	    ENDIF
-         ELSEIF(K(IPART,3).EQ.OFFSET)THEN
+         ELSEIF(K(IPART,3).EQ.LME2ORIG)THEN
           LME2=IPART        
 	    IF(K(IPART,2).EQ.21)THEN
 	     TYPE2='GC'
@@ -811,19 +1192,44 @@ C--end of colour singlet
 	    ENDIF
 	   ENDIF
  180    CONTINUE
-	  K(LME1,1)=1
-	  K(LME2,1)=1
+	  if (k(lme1,1).lt.11) K(LME1,1)=1
+	  if (k(lme2,1).lt.11) K(LME2,1)=1
 	  PID=K(LME1,2)
 	  ENI=MAX(P(LME1,4),P(LME2,4))
 	  DO 183 IPART=OFFSET+1, OFFSET+NPART
 	   IF((IPART.NE.LME1).AND.(IPART.NE.LME2).AND.(K(IPART,1).LT.11))
      &	   K(IPART,1)=4
+	   if (k(ipart,2).eq.22) k(ipart,1)=4
  183    CONTINUE	  
 
 C--find virtualities and adapt four-vectors
-	  IF(COLLIDER.EQ.'PPJJ')THEN
-         QMAX1=PYP(LME1,10)
-         QMAX2=PYP(LME2,10)
+	  if((COLLIDER.EQ.'PPZJ').OR.(COLLIDER.EQ.'PPZQ').or.
+     &	(COLLIDER.EQ.'PPZG').or.(COLLIDER.EQ.'PPWJ').or.
+     &	(COLLIDER.EQ.'PPWQ').or.(COLLIDER.EQ.'PPWG'))THEN 
+	    if (abs(k(lme1,2)).gt.21) then
+           QMAX1=0.d0
+           QMAX2=sqrt(pari(18)+p(lme1,5)**2)
+	    else
+           QMAX1=sqrt(pari(18)+p(lme2,5)**2)
+           QMAX2=0.d0
+	    endif
+           EMAX=P(LME1,4)+P(LME2,4)
+           THETA1=-1.d0
+           THETA2=-1.d0
+        ELSEIF(COLLIDER.EQ.'PPJJ'.OR.COLLIDER.EQ.'PPYJ'
+     &          .OR.COLLIDER.EQ.'PPYQ'.OR.COLLIDER.EQ.'PPYG')THEN
+	     if (k(lme1,1).eq.4) then
+	       qmax1 = 0.d0
+	     else
+             QMAX1=pari(17)
+	     endif
+	     if (k(lme2,1).eq.4) then
+	       qmax2 = 0.d0
+	     else
+             QMAX2=pari(17)
+	     endif
+!        QMAX1=PYP(LME1,10)*exp(0.3*abs(pyp(lme1,17)-pyp(lme2,17))/2.)/2.
+!        QMAX2=PYP(LME2,10)*exp(0.3*abs(pyp(lme1,17)-pyp(lme2,17))/2.)/2.
          EMAX=P(LME1,4)+P(LME2,4)
          THETA1=-1.d0
          THETA2=-1.d0
@@ -842,16 +1248,26 @@ C--find virtualities and adapt four-vectors
 	   EMAX=P(LME1,4)+P(LME2,4)
 	   THETA1=-1.d0
 	   THETA2=-1.d0
-        ENDIF 
-C--find virtuality
+        ENDIF
+C--   find virtuality
         Q1=GETMASS(0.d0,QMAX1,THETA1,EMAX,TYPE1,EMAX,.FALSE.,
-     &	Z1,WHICH1)
+     &       Z1,WHICH1)
         Q2=GETMASS(0.d0,QMAX2,THETA2,EMAX,TYPE2,EMAX,.FALSE.,
-     &	Z2,WHICH2)
- 182    ENEW1=ETOT/2.d0 + (Q1**2-Q2**2)/(2.*ETOT)
-        ENEW2=ETOT/2.d0 - (Q1**2-Q2**2)/(2.*ETOT)
-	  P21 = (ETOT/2.d0 + (Q1**2-Q2**2)/(2.*ETOT))**2 - Q1**2
-	  P22 = (ETOT/2.d0 - (Q1**2-Q2**2)/(2.*ETOT))**2 - Q2**2
+     &       Z2,WHICH2)
+ 182	  if (abs(k(lme1,2)).gt.21) then
+	    m1=p(lme1,5)
+	  else
+	    m1=q1
+	  endif
+ 	  if (abs(k(lme2,2)).gt.21) then
+	    m2=p(lme2,5)
+	  else
+	    m2=q2
+	  endif
+        ENEW1=ETOT/2.d0 + (m1**2-m2**2)/(2.*ETOT)
+        ENEW2=ETOT/2.d0 - (m1**2-m2**2)/(2.*ETOT)
+	  P21 = (ETOT/2.d0 + (m1**2-m2**2)/(2.*ETOT))**2 - m1**2
+	  P22 = (ETOT/2.d0 - (m1**2-m2**2)/(2.*ETOT))**2 - m2**2
 	  WEIGHT=1.d0
 	  IF((PYR(0).GT.WEIGHT).OR.(P21.LT.0.d0).OR.(P22.LT.0.d0)
      &	.OR.(ENEW1.LT.0.d0).OR.(ENEW2.LT.0.d0)
@@ -870,13 +1286,13 @@ C--find virtuality
 	  P(LME1,2)=P(LME1,2)*SQRT(P21)/POLD
 	  P(LME1,3)=P(LME1,3)*SQRT(P21)/POLD
 	  P(LME1,4)=ENEW1
-	  P(LME1,5)=Q1
+	  P(LME1,5)=m1
         POLD=PYP(LME2,8)
 	  P(LME2,1)=P(LME2,1)*SQRT(P22)/POLD
 	  P(LME2,2)=P(LME2,2)*SQRT(P22)/POLD
 	  P(LME2,3)=P(LME2,3)*SQRT(P22)/POLD
 	  P(LME2,4)=ENEW2
-	  P(LME2,5)=Q2
+	  P(LME2,5)=m2
         CALL PYROBO(LME1,LME1,0d0,0d0,BETA(1),BETA(2),BETA(3))
         CALL PYROBO(LME2,LME2,0d0,0d0,BETA(1),BETA(2),BETA(3))
 C--correct for overestimated energy
@@ -901,8 +1317,8 @@ C--correct for overestimated energy
           CALL PYROBO(LME2,LME2,0d0,0d0,-BETA(1),-BETA(2),-BETA(3))
 	    GOTO 182
          ENDIF
-        ENDIF 
-	 
+        ENDIF
+        
 C--correct to ME for first parton
 	  IF(COLLIDER.EQ.'EEJJ')THEN
          BETA(1)=(P(LME1,1)+P(LME2,1))/(P(LME1,4)+P(LME2,4))
@@ -981,6 +1397,29 @@ C--correct for overestimated energy
           ENDIF
          ENDIF 
 	  ENDIF
+
+C--transfer recoil to decay leptons in V+jet
+	  if((COLLIDER.EQ.'PPZJ').OR.(COLLIDER.EQ.'PPZQ').or.
+     &	(COLLIDER.EQ.'PPZG').or.(COLLIDER.EQ.'PPWJ').or.
+     &	(COLLIDER.EQ.'PPWQ').or.(COLLIDER.EQ.'PPWG'))THEN 
+	    beta(1)=p(lv,1)/p(lv,4)
+	    beta(2)=p(lv,2)/p(lv,4)
+	    beta(3)=p(lv,3)/p(lv,4)
+          CALL PYROBO(llep1,llep1,0d0,0d0,-BETA(1),-BETA(2),-BETA(3))
+          CALL PYROBO(llep2,llep2,0d0,0d0,-BETA(1),-BETA(2),-BETA(3))
+	    if (abs(k(lme1,2)).gt.21) then
+	      beta(1)=p(lme1,1)/p(lme1,4)
+	      beta(2)=p(lme1,2)/p(lme1,4)
+	      beta(3)=p(lme1,3)/p(lme1,4)
+	    else
+	      beta(1)=p(lme2,1)/p(lme2,4)
+	      beta(2)=p(lme2,2)/p(lme2,4)
+	      beta(3)=p(lme2,3)/p(lme2,4)
+	    endif
+          CALL PYROBO(llep1,llep1,0d0,0d0,BETA(1),BETA(2),BETA(3))
+          CALL PYROBO(llep2,llep2,0d0,0d0,BETA(1),BETA(2),BETA(3))
+	  endif
+
   
         ZA(LME1)=1.d0
         ZA(LME2)=1.d0
@@ -1049,18 +1488,10 @@ C--develop parton shower
 	  ENDIF
        ENDIF
 
-	 DO 888 I=1,N
-	  IF(K(I,2).EQ.94)THEN
-	   NGOOD=NGOOD-1
-	   NSTRANGE=NSTRANGE+1
-	   NDISC=NDISC+1
-	   GOTO 102
-	  ENDIF 
- 888	 CONTINUE	   
 	 IF(MSTU(30).NE.ERRCOUNT)THEN
 	  ERRCOUNT=MSTU(30)
 	 ELSE 
-	  CALL CONVERTTOHEPMC(HPMCFID,NGOOD,PID)
+	  CALL CONVERTTOHEPMC(HPMCFID,NGOOD,PID,b1,b2)
 	 ENDIF
 
 C--write message to log-file
@@ -1164,8 +1595,8 @@ C--find string end (=quark or antiquark)
       DO 40 I=1,NOLD
        IF((K(I,1).EQ.11).OR.(K(I,1).EQ.12).OR.(K(I,1).EQ.13)
      &            .OR.(K(I,1).EQ.14)) K(I,1)=17
-       IF(((K(I,1).EQ.1).OR.(K(I,1).EQ.3).OR.(K(I,1).EQ.4))
-     &	.AND.((K(I,2).LT.6).OR.ISDIQUARK(K(I,2))))THEN
+       IF(((K(I,1).EQ.1).OR.(K(I,1).EQ.3).OR.(K(I,1).EQ.4).OR.
+     &   (K(I,1).EQ.5)).AND.((K(I,2).LT.6).OR.ISDIQUARK(K(I,2))))THEN
         LQUARK=I
 	  GOTO 41
        ENDIF
@@ -1198,7 +1629,8 @@ C--append matching colour partner
 	LMATCH=0
 	DO 44 J=1,10000000
 	 DO 42 I=1,NOLD
-	  IF(((K(I,1).EQ.1).OR.(K(I,1).EQ.3).OR.(K(I,1).EQ.4))
+	  IF(((K(I,1).EQ.1).OR.(K(I,1).EQ.3).OR.(K(I,1).EQ.4)
+     &						.OR.(K(I,1).EQ.5))
      &      .AND.(((TRIP(I).EQ.ANTI(N)).AND.(TRIP(I).NE.0))
      &		.OR.((ANTI(I).EQ.TRIP(N)).AND.(ANTI(I).NE.0))))THEN
          N=N+1
@@ -1230,7 +1662,7 @@ C--append matching colour partner
          ENDIF
 	  ENDIF
  42	 CONTINUE
-C--no matching colour partner found, add artificial end point
+C--no matching colour partner found
 	 write(logfid,*)'Error in MAKESTRINGS_VAC: failed to reconstruct '//
      &'colour singlet system, will discard event'
 	 discard = .true.
@@ -1241,9 +1673,11 @@ C-----------------------------------------
 C--find gluon where anti-triplet is not matched
  50   LLOOSE=0
       DO 45 I=1,NOLD
-       IF(((K(I,1).EQ.1).OR.(K(I,1).EQ.3).OR.(K(I,1).EQ.4)))THEN
+       IF(((K(I,1).EQ.1).OR.(K(I,1).EQ.3).OR.(K(I,1).EQ.4)
+     &					.OR.(K(I,1).EQ.5)))THEN
 	  DO 46 J=1,NOLD
-	   IF(((K(I,1).EQ.1).OR.(K(I,1).EQ.3).OR.(K(I,1).EQ.4)))THEN
+	   IF(((K(I,1).EQ.1).OR.(K(I,1).EQ.3).OR.(K(I,1).EQ.4)
+     &					.OR.(K(I,1).EQ.5)))THEN
 	    IF(ANTI(I).EQ.TRIP(J)) GOTO 45
 	   ENDIF
  46	  CONTINUE
@@ -1284,7 +1718,8 @@ C--append matching colour partner
 	LMATCH=0
 	DO 48 J=1,10000000
 	 DO 49 I=1,NOLD
-	  IF(((K(I,1).EQ.1).OR.(K(I,1).EQ.3).OR.(K(I,1).EQ.4))
+	  IF(((K(I,1).EQ.1).OR.(K(I,1).EQ.3).OR.(K(I,1).EQ.4)
+     &				.OR.(K(I,1).EQ.5))
      &		.AND.(ANTI(I).EQ.TRIP(N)))THEN
          N=N+1
          IF(N.GT.22990) THEN
@@ -1336,9 +1771,13 @@ C--Parameter common block
       INTEGER NF
 	DOUBLE PRECISION Q0,LQCD,LTIME,LPS,SCALEFACM
       LOGICAL ANGORD,SCATRECOIL,ALLHAD,compress
+C--colour index common block
+	COMMON/COLOUR/TRIP(23000),ANTI(23000),COLMAX
+	INTEGER TRIP,ANTI,COLMAX
 C--local variables
-      INTEGER NOLD,I,J,LMAX,LMIN,LEND
-      DOUBLE PRECISION EMAX,MINV,MMIN,Z,GENERATEZ,MCUT,EADDEND,PYR,DIR
+      INTEGER NOLD,I,J,LMAX,LMIN,LEND,nold1
+      DOUBLE PRECISION EMAX,MINV,MMIN,Z,GENERATEZ,MCUT,EADDEND,PYR,DIR,
+     &pyp
       DATA MCUT/1.d8/
       DATA EADDEND/10.d0/
 C--identifier of file for hepmc output and logfile
@@ -1353,6 +1792,34 @@ C--discard event flag
 
 	 i = 0
 	 if (compress) roomleft = compressevent(i)
+      NOLD1=N
+C--remove all active lines that are leptons, gammas, hadrons etc.
+	DO 52 I=1,NOLD1
+	 IF((K(I,1).EQ.4).AND.(TRIP(I).EQ.0).AND.(ANTI(I).EQ.0))THEN
+C--copy line to end of event record
+        N=N+1
+        IF(N.GT.22990) THEN
+         write(logfid,*)'event too long for event record'
+         DISCARD=.TRUE.
+         RETURN
+        ENDIF
+        K(N,1)=11
+        K(N,2)=K(I,2)
+        K(N,3)=I
+        K(N,4)=0
+        K(N,5)=0
+        P(N,1)=P(I,1)
+        P(N,2)=P(I,2)
+        P(N,3)=P(I,3)
+        P(N,4)=P(I,4)
+        P(N,5)=P(I,5)
+        K(I,1)=17
+        K(I,4)=N
+        K(I,5)=N
+	  TRIP(N)=TRIP(I)
+	  ANTI(N)=ANTI(I)
+	 ENDIF
+ 52	CONTINUE
        NOLD=N
 C--find most energetic unfragmented parton in event
  43    EMAX=0
@@ -1360,8 +1827,9 @@ C--find most energetic unfragmented parton in event
        DO 40 I=1,NOLD
         IF((K(I,1).EQ.11).OR.(K(I,1).EQ.12).OR.(K(I,1).EQ.13)
      &            .OR.(K(I,1).EQ.14)) K(I,1)=17
-        IF(((K(I,1).EQ.1).OR.(K(I,1).EQ.3).OR.(K(I,1).EQ.4))
-     &	.AND.(P(I,4).GT.EMAX))THEN
+        if (abs(pyp(I,17)).gt.4.d0) k(i,1)=17
+        IF(((K(I,1).EQ.1).OR.(K(I,1).EQ.3).OR.(K(I,1).EQ.4)
+     &	.OR.(K(I,1).EQ.5)).AND.(P(I,4).GT.EMAX))THEN
          EMAX=P(I,4)
          LMAX=I
         ENDIF
@@ -1456,7 +1924,8 @@ C--find closest partner
  42    MMIN=1.d10
        LMIN=0
        DO 41 I=1,NOLD
-        IF(((K(I,1).EQ.1).OR.(K(I,1).EQ.3).OR.(K(I,1).EQ.4))
+        IF(((K(I,1).EQ.1).OR.(K(I,1).EQ.3).OR.(K(I,1)
+     &			.EQ.4).OR.(K(I,1).EQ.5))
      &      .AND.((K(I,2).EQ.21).OR.((K(I,2)*K(LEND,2).LT.0.d0).AND.
      &		(K(I,3).NE.K(LEND,3))))
      &      .AND.(P(I,1)*P(LEND,1).GT.0.d0))THEN
@@ -1635,10 +2104,16 @@ C--event weight
 C--identifier of file for hepmc output and logfile
 	common/hepmcid/hpmcfid,logfid
 	integer hpmcfid,logfid
+C--extra storage for scattering centres before interactions
+       common/storescatcen/nscatcen,maxnscatcen,scatflav(10000),
+     & scatcen(10000,5),writescatcen,writedummies
+	 integer nscatcen,maxnscatcen,scatflav
+	 double precision scatcen
+	 logical writescatcen,writedummies
 C--local variables
-      INTEGER L,LINE,NOLD,TYPI,LINEOLD,LKINE,nendold
+      INTEGER L,LINE,NOLD,TYPI,LINEOLD,LKINE,nendold,nscatcenold
       DOUBLE PRECISION THETA,PHI,PYP,FORMTIME,STARTTIME,TLEFT,
-     &TSUM,DELTAT,NEWMASS,GETMASS,Q,GETMS,ZDEC,X,MS,DTCORR
+     &TSUM,DELTAT,NEWMASS,GETMASS,Q,GETMS,ZDEC,X,DTCORR
 	LOGICAL OVERQ0,QQBARDEC
 	CHARACTER TYP
 	LOGICAL RADIATION,RETRYSPLIT,MEDIND,roomleft,compressevent
@@ -1662,9 +2137,8 @@ C--local variables
       IF ((N.GT.20000).and.compress) roomleft = compressevent(line)
 
 20	IF(DISCARD) RETURN
- 	MS=GETMS(MV(LINE,1),MV(LINE,2),MV(LINE,3),MV(LINE,4))
 	IF(((K(LINE,1).EQ.1).AND.(P(LINE,5).GT.0.d0))
-     &	.OR.((K(LINE,1).EQ.2).AND.(P(LINE,5).GT.MS)))THEN
+     &	.OR.((K(LINE,1).EQ.2).AND.(zd(line).gt.0.d0)))THEN
        IF(MEDIND)THEN
         FORMTIME=starttime
        ELSE 
@@ -1689,6 +2163,7 @@ C--no scattering
 C--if there is radiation associated with the parton then form it now
 C--rotate such that momentum points in z-direction
         NOLD=N
+        nscatcenold=nscatcen
         THETA=PYP(LINE,13)
         PHI=PYP(LINE,15)
         CALL PYROBO(LINE,LINE,0d0,-PHI,0d0,0d0,0d0)
@@ -1751,6 +2226,7 @@ C--do initial state splitting if there is one
 	 LINEOLD=LINE
 	 ZDEC=ZD(LINE)
 	 QQBARDEC=QQBARD(LINE)
+        nscatcenold=nscatcen
  25	 IF(X.LT.1.d0) THEN
 	  CALL MAKEINSPLIT(LINE,X,QSUM2,Q,TYPI,STARTTIME+TSUM,DELTAT)
         IF(DISCARD) RETURN
@@ -1802,7 +2278,7 @@ C--do initial state splitting if there is one
 	  IF(NEND.GT.0)THEN
 	   CALL DOFISTATESCAT(LINE,STARTTIME+TSUM,TLEFT,DELTAT,
      &		NEWMASS,OVERQ0,ZDEC,QQBARDEC)
-	   IF(NEWMASS.GT.(P(LINE,5)+1.d-10))THEN
+	   IF(NEWMASS.GT.(P(LINE,5)*(1.d0+1.d-6)))THEN
 	    MEDIND=.TRUE.
 	   ELSE
 	    MEDIND=.FALSE.
@@ -1840,6 +2316,7 @@ C--do kinematics
 	     LINE=LINEOLD
 	     X=1.d0
 	     K(LINE,1)=1
+	     nscatcen=nscatcenold
 	     NSPLIT=NSPLIT-EVWEIGHT
 	     GOTO 25
 	   else
@@ -1860,12 +2337,12 @@ C--do kinematics
 	ENDIF
 
  21   IF(((K(LINE,1).EQ.1).AND.(P(LINE,5).GT.0.d0))
-     &	.OR.((K(LINE,1).EQ.2).AND.(P(LINE,5).GT.MS))
+     &	.OR.((K(LINE,1).EQ.2).AND.(zd(line).gt.0.d0))
      &	.OR.(STARTTIME.LT.LTIME))THEN
 	 GOTO 20
 	ENDIF
 	IF((K(LINE,1).EQ.1).AND.(P(LINE,5).EQ.0.d0)) K(LINE,1)=4
-	IF((K(LINE,1).EQ.2).AND.(P(LINE,5).LE.MS)) K(LINE,1)=4
+	IF((K(LINE,1).EQ.2).AND.(zd(line).lt.0.d0)) K(LINE,1)=5
       END
 
 
@@ -1939,7 +2416,8 @@ C--local variables
 
 C--on-shell partons cannot split
 	IF((P(L,5).EQ.0d0).OR.(K(L,1).EQ.11).OR.(K(L,1).EQ.12)
-     &  .OR.(K(L,1).EQ.13).OR.(K(L,1).EQ.14).OR.(K(L,1).EQ.3)) GOTO 31
+     &  .OR.(K(L,1).EQ.13).OR.(K(L,1).EQ.14).OR.(K(L,1).EQ.3)
+     &  .or.(zd(l).lt.0.d0)) GOTO 31
 C--quark or gluon?
 	IF(K(L,2).EQ.21)THEN
 	 QUARK=.FALSE.
@@ -3020,49 +3498,54 @@ C--local variables
 	Z=1.d0
 	QA=1.d0	
 	IF(MAX(P(L,5),MASS).GT.0.d0)THEN
-	 IF(-Q2.GT.-QOLD2)THEN
-	  ZOLD=ZDEC
-	  QQBAROLD=QQBARDEC
-	  QTMP=GETMASS(SQRT(-QOLD2),SQRT(-Q2),-1.d0,X*P(L,4),TYP,
+	   IF(-Q2.GT.-QOLD2)THEN
+	      ZOLD=ZDEC
+	      QQBAROLD=QQBARDEC
+	      QTMP=GETMASS(0.d0,SQRT(-Q2),-1.d0,X*P(L,4),TYP,
      &		SQRT(-Q2),IN,ZDEC,QQBARDEC)
-	  IF(QTMP.EQ.0.d0)THEN
-	   GETNEWMASS=MASS
-	   ZDEC=ZOLD
-	   QQBARDEC=QQBAROLD
-	  ELSE
-	   GETNEWMASS=QTMP
-	  ENDIF
-	 ELSE
-	  PNOSPLIT1=GETSUDAKOV(SQRT(-QOLD2),QA,Q0,Z,X*P(L,4),
-     &      TYP,MV(L,4),IN)
-	  PNOSPLIT2=GETSUDAKOV(SQRT(-Q2),QA,Q0,Z,X*P(L,4),
-     &      TYP,MV(L,4),IN)
-	  PKEEP=(1.-PNOSPLIT2)/(1.-PNOSPLIT1)
-	  IF(PYR(0).LT.PKEEP)THEN
-	   IF(P(L,5).LT.SQRT(-Q2))THEN
-	    GETNEWMASS=MASS
+	      IF(QTMP.LT.SQRT(-QOLD2))THEN
+	        GETNEWMASS=MASS
+	        ZDEC=ZOLD
+              QQBARDEC=QQBAROLD
+	      ELSE
+	         GETNEWMASS=QTMP
+	      ENDIF
 	   ELSE
- 55	    GETNEWMASS=GETMASS(0.d0,SQRT(-Q2),-1.d0,X*P(L,4),TYP,
+	     PNOSPLIT1=GETSUDAKOV(SQRT(-QOLD2),QA,Q0,Z,X*P(L,4),
+     &      TYP,MV(L,4),IN)
+	     PNOSPLIT2=GETSUDAKOV(SQRT(-Q2),QA,Q0,Z,X*P(L,4),
+     &      TYP,MV(L,4),IN)
+	     PKEEP=(1.-PNOSPLIT2)/(1.-PNOSPLIT1)
+	     IF(PYR(0).LT.PKEEP)THEN
+	       IF(P(L,5).LT.SQRT(-Q2))THEN
+		   GETNEWMASS=MASS
+		 ELSE
+ 55		   GETNEWMASS=GETMASS(Q0,SQRT(-Q2),-1.d0,X*P(L,4),TYP,
      &		SQRT(-Q2),IN,ZDEC,QQBARDEC)
-	    IF((GETNEWMASS.EQ.0.d0).AND.(X*P(L,4).GT.Q0)) GOTO 55
+		   IF((GETNEWMASS.EQ.0.d0).AND.(X*P(L,4).GT.Q0)) GOTO 55
+		 ENDIF
+	     ELSE
+	       GETNEWMASS=0.d0
+	       ZDEC=0.d0
+	       QQBARDEC=.FALSE.
+	     ENDIF
 	   ENDIF
-	  ELSE
-	   GETNEWMASS=0.d0
-	   ZDEC=0.d0
-	   QQBARDEC=.FALSE.
-	  ENDIF
-	 ENDIF
-	ELSE
-	 IF(-Q2.GT.-QOLD2)THEN
-	  GETNEWMASS=GETMASS(MAX(SQRT(-QOLD2),Q0),SQRT(-Q2),-1.d0,
-     &        X*P(L,4),TYP,X*P(L,4),IN,ZDEC,QQBARDEC)
 	 ELSE
-	  GETNEWMASS=0.d0
-	  ZDEC=0.d0
-	  QQBARDEC=.FALSE.
+	   IF(-Q2.GT.-QOLD2)THEN
+	     GETNEWMASS=GETMASS(0.d0,SQRT(-Q2),-1.d0,
+     &        X*P(L,4),TYP,X*P(L,4),IN,ZDEC,QQBARDEC)
+           if(getnewmass.lt.SQRT(-QOLD2))then
+	       GETNEWMASS=0.d0
+	       ZDEC=0.d0
+	       QQBARDEC=.FALSE.
+           endif
+	   ELSE
+	     GETNEWMASS=0.d0
+	     ZDEC=0.d0
+	     QQBARDEC=.FALSE.
+	   ENDIF
 	 ENDIF
-	ENDIF
-	GETNEWMASS=MIN(GETNEWMASS,x*P(L,4))
+	 GETNEWMASS=MIN(GETNEWMASS,x*P(L,4))
 	END	
 
 
@@ -3349,8 +3832,14 @@ C--number of scattering events
 C--event weight
 	COMMON/WEIGHT/EVWEIGHT,sumofweights
 	double precision EVWEIGHT,sumofweights
+C--extra storage for scattering centres before interactions
+      common/storescatcen/nscatcen,maxnscatcen,scatflav(10000),
+     &scatcen(10000,5),writescatcen,writedummies
+	integer nscatcen,maxnscatcen,scatflav
+	double precision scatcen
+	logical writescatcen,writedummies
 C--local variables
-      INTEGER L,LINE,N1,N2,J,DIR,lold,nold,colmaxold,statold
+      INTEGER L,LINE,N1,N2,J,DIR,lold,nold,colmaxold,statold,nscatcenold
       DOUBLE PRECISION PYR,PI,BETA(3),THETA,PHI,PYP,PHI2,MAXT,T,
      &NEWMASS,DELTAM,DM,TTOT,DMLEFT,LAMBDA,TIME,ENDTIME,X,tmp,
      &m32,newm2,shat,theta2,z,gettemp,E3new,E4new,p32,p42,p3old,
@@ -3397,6 +3886,7 @@ C--projectile type
 	  TYP='QQ'
 	  DIR=0
 	 ENDIF
+       K(1,1)=6
 	 K(1,2)=SCATCENTRES(J,1)
 	 P(1,1)=SCATCENTRES(J,2)
 	 P(1,2)=SCATCENTRES(J,3)
@@ -3581,8 +4071,10 @@ C--take care of incoming projectile
 C--outgoing scattering centre
        ZA(N-1)=1.d0
 	 THETAA(N-1)=-1.d0
-       ZD(N-1)=0.d0
+       ZD(N-1)=-1.d0
        QQBARD(N-1)=.false.
+C--temporary status code, will be overwritten later
+       K(N-1,1)=3
 	 K(N-1,2)=21
 	 K(N-1,3)=0
 	 K(N-1,4)=0
@@ -3652,6 +4144,7 @@ C--adjust mass and re-shuffle momenta
 	   if (abs(tmp-m32).gt.1.d-6) 
      &	write(logfid,*) 'Oups, messed up projectiles mass:',
      &	tmp,m32,p(n,5)
+!---------------------------------       
 	   p(n-1,1) = sqrt(p42)*p(n-1,1)/p3old
 	   p(n-1,2) = sqrt(p42)*p(n-1,2)/p3old
 	   p(n-1,3) = sqrt(p42)*p(n-1,3)/p3old
@@ -3666,6 +4159,13 @@ C--adjust mass and re-shuffle momenta
      &     (abs(p(n,3)+p(n-1,3)).gt.1.d-6)) 
      &	write(logfid,*) 'Oups, momentum not conserved', 
      &	p(n,1)+p(n-1,1),p(n,2)+p(n-1,2),p(n,3)+p(n-1,3)
+!---------------------------------       
+!        P(N-1,1)=P(1,1)
+!        P(N-1,2)=P(1,2)
+!        P(N-1,3)=P(1,3)
+!        P(N-1,4)=P(1,4)
+!        P(N-1,5)=P(1,5)
+!---------------------------------       
 	 endif
 
 C--transformation to lab
@@ -3678,11 +4178,11 @@ C--transformation to lab
        CALL PYROBO(1,1,THETA,0d0,0d0,0d0,0d0)
        CALL PYROBO(1,1,0d0,PHI,0d0,0d0,0d0)
        CALL PYROBO(1,1,0d0,0d0,BETA(1),BETA(2),BETA(3))
-	 if (.not.allhad) then
+      if (.not.allhad) then
 	  k(n-1,1)=13
 	 else
-        IF(SCATRECOIL.AND.(P(N-1,4).GT.1.5*3.*
-     &GETTEMP(MV(1,1),MV(1,2),MV(1,3),MV(1,4))))THEN
+        IF(SCATRECOIL.AND.(P(N-1,4).GT.(10.*3.*
+     &GETTEMP(MV(1,1),MV(1,2),MV(1,3),MV(1,4)))))THEN
          K(N-1,1)=2
         ELSE
          K(N-1,1)=3
@@ -3731,7 +4231,33 @@ C--set the production vertices: x_mother + (tprod - tprod_mother) * beta_mother
 	 ENDIF
 	 MV(LINE,5)=ALLQS(J,6)
 
-	 if ((.not.redokin).and.(.not.rejectt)) NSCAT=NSCAT+EVWEIGHT
+
+C--store scattering centre before interaction in separate common block
+	 if (writescatcen.and.(.not.rejectt).and.
+     &		(nscatcen.lt.maxnscatcen)) then
+	  nscatcen = nscatcen+1
+	  if (nscatcen.le.maxnscatcen) then
+	   scatflav(nscatcen) = k(1,2)
+	   scatcen(nscatcen,1) = p(1,1)
+	   scatcen(nscatcen,2) = p(1,2)
+	   scatcen(nscatcen,3) = p(1,3)
+	   scatcen(nscatcen,4) = p(1,4)
+	   scatcen(nscatcen,5) = p(1,5)
+	  else
+	   write(logfid,*) 
+     &'WARNING: no room left to store further scattering centres'
+	  endif
+	 endif
+
+!	if ((p(line,4).gt.100.d0).and.(p(n,4)-p(line,4).gt.1.d0)) then
+!	  write(*,*)p(line,1),p(line,2),p(line,3),p(line,4),p(line,5)
+!	  write(*,*)p(n,1),p(n,2),p(n,3),p(n,4),p(n,5)
+!	  write(*,*)p(1,1),p(1,2),p(1,3),p(1,4),p(1,5)
+!	  write(*,*)p(n-1,1),p(n-1,2),p(n-1,3),p(n-1,4),p(n-1,5)
+!	  write(*,*)t
+!	  write(*,*)GETTEMP(MV(1,1),MV(1,2),MV(1,3),MV(1,4))
+!	  write(*,*)
+!	endif
 
 	 DMLEFT=DMLEFT-(p(n,5)-P(LINE,5))
 	 LINE=N
@@ -3766,7 +4292,8 @@ C--set the production vertices: x_mother + (tprod - tprod_mother) * beta_mother
         endif
 	  goto 204
 	endif
-	if ((p(n,5).lt.0.d0).or.((p(n,5).gt.0.d0).and.(p(n,5).lt.q0)))
+	if ((k(n,1).eq.1).and.
+     &	((p(n,5).lt.0.d0).or.((p(n,5).gt.0.d0).and.(p(n,5).lt.q0))))
      &write(logfid,*)'dokinematics did not reach sensible mass: ',
      &p(n,5),newm,p(l,5),newm2
 	NSCATEFF=NSCATEFF+EVWEIGHT
@@ -4671,7 +5198,7 @@ C--variables for cross section integration
 C--local variables
 	integer mode
       DOUBLE PRECISION UP,EN,LW,SCATPRIMFUNC,CCOL,MP,
-     &LOW,GETPDFXINT,GETXSECINT,MDEB,pz,pcms2,shat,
+     &LOW,GETPDFXINT,GETXSECINT,MDEB,pz,pcms2,shat,gettemp,
      &x,y,z,t,getmd,avmom(5),px,py,getmdmin,getmdmax,pproj,psct
       CHARACTER TYPE1,TYPE2
 
@@ -4777,7 +5304,7 @@ C--local variables
 	DOUBLE PRECISION qbmin,qbmax,theta,ep,max2,zdec,
      &q2min,alphmax,alphas,log14,pref,q2max,sudaover,gmin,
      &gmax,arg,cand,eps,trueeps,trueval,oest,weight,getinspliti,
-     &r,pyr,z,rz,thetanew,r2,pi,pqq,pgg,pqg
+     &r,pyr,z,rz,thetanew,r2,pi,pqq,pgg,pqg,rmin
       CHARACTER*2 TYPE
 	LOGICAL INS,QQBARDEC
       DATA PI/3.141592653589793d0/
@@ -4793,7 +5320,7 @@ C--local variables
 	 pref=29.*alphmax/(8.*2.*PI)
       ENDIF
 
-C--check if virtual mass is allowed, return 0.d0 otherwise
+C--check if phase space available, return 0.d0 otherwise
 	IF((qbmax.LE.QBMIN).OR.(EP.LT.QBMIN)) THEN
 	 getmass=0.d0
 	 ZDEC=0.d0
@@ -4802,21 +5329,45 @@ C--check if virtual mass is allowed, return 0.d0 otherwise
 	ENDIF
 
       q2max = qbmax**2
- 21	sudaover = exp(-pref*(log(q2min/(4.*q2max))**2 - log14**2))
-	IF(pyr(0).LE.sudaover)THEN
+! 21	sudaover = exp(-pref*(log(q2min/(4.*q2max))**2 - log14**2))
+!	IF(pyr(0).LE.sudaover)THEN
+ 21   if (q2max-qbmin**2.lt.1e-4)then
+	    getmass=qbmin
+	    zdec=0.5
+	    IF(TYPE.EQ.'QQ')THEN
+	      QQBARDEC=.FALSE.
+	    ELSE
+	      IF(PYR(0).LT.PQG(0.5d0)/(PQG(0.5d0)+PGG(0.5d0)))THEN
+	        QQBARDEC=.TRUE.
+	      ELSE 
+	        QQBARDEC=.FALSE.
+	      ENDIF
+	    endif
+	    return
+        endif
+        gmax = pref*log(q2min/(4.*q2max))**2
+        if (qbmin.gt.0.d0) then
+          rmin = exp(pref*log(q2min/(4.*qbmin**2))**2-gmax)
+        else
+	    rmin = 0.d0
+	  endif  
+	  
+       r=pyr(0)*(1.d0-rmin)+rmin
+       arg=gmax+log(r)
+       if(arg.lt.0.d0)then
 	 getmass=0.d0
 	 ZDEC=0.d0
 	 QQBARDEC=.FALSE.
 	 RETURN
 	endif
-	r=pyr(0)
-	gmin = pref*log14**2
-	gmax = pref*log(q2min/(4.*q2max))**2
-	arg = log(r*exp(gmax)+(1.-r)*exp(gmin))
+!	r=pyr(0)
+!	gmin = pref*log14**2
+!	gmax = pref*log(q2min/(4.*q2max))**2
+!	arg = log(r*exp(gmax)+(1.-r)*exp(gmin))
 	cand = q2min*exp(sqrt(arg/pref))/4.
 	eps = q2min/(4.*cand)
 
-	if (cand.lt.qbmin**2) then
+	if ((cand.lt.q2min).or.(cand.lt.qbmin**2)) then
 	 getmass=0.d0
 	 ZDEC=0.d0
 	 QQBARDEC=.FALSE.
@@ -4844,13 +5395,22 @@ C--find true z interval
 	    weight = 0.
 	  else
 	    if (type.eq.'QQ')then
-	      trueval = alphas(ptfac*z*(1.-z)*cand,lps)*pqq(z)/(2.*pi)
+!	      if (ins) then
+!                trueval = alphas(ptfac*(1.-z)*cand,lps)*pqq(z)/(2.*pi)
+!              else
+	        trueval = alphas(ptfac*z*(1.-z)*cand,lps)*pqq(z)/(2.*pi)
+!              endif
 	      oest = 2.*pref/(1.-z)
 	      weight = trueval/oest
 	    else
 	      if (pyr(0).lt.(17./29.)) z = 1.-z
-	      trueval = alphas(ptfac*z*(1.-z)*cand,lps)
+!	      if (ins)then
+!	        trueval = alphas(ptfac*(1.-z)*cand,lps)
+!     &			*(pgg(z)+pqg(z))/(2.*pi)
+!              else
+	        trueval = alphas(ptfac*z*(1.-z)*cand,lps)
      &			*(pgg(z)+pqg(z))/(2.*pi)
+!              endif
 	      oest = alphmax*(17./(4.*z)+3./(1.-z))/(2.*pi)
 	      weight = trueval/oest
 	    endif
@@ -5522,7 +6082,26 @@ C--do negative arguments first
 	 CALL ODEINT(YSTART,X,1000.d0,EPSI,HFIRST,0.d0,5)
        EIXS(2,I)=-YSTART
 C--now do the positive arguments
-	 call eix(x,ei)
+       IF (X.EQ.0.0) THEN
+        EI=-1.0D+300
+       ELSE IF (X.LE.40.0) THEN
+        EI=1.0D0
+        R=1.0D0
+        DO 15 K=1,100
+         R=R*K*X/(K+1.0D0)**2
+         EI=EI+R
+         IF (DABS(R/EI).LE.1.0D-15) GO TO 20
+15      CONTINUE
+20      GA=0.5772156649015328D0
+        EI=GA+DLOG(X)+X*EI
+       ELSE
+        EI=1.0D0
+        R=1.0D0
+        DO 25 K=1,20
+         R=R*K/X
+25       EI=EI+R
+         EI=DEXP(X)/X*EI
+       ENDIF
 	 EIXS(3,I)=EI
  10   CONTINUE
 	END
@@ -5707,6 +6286,7 @@ C--calculate upper limit for density*cross section
 	NEFFMAX=GETNEFFMAX()
 	NEFFMIN=GETNATMDMIN()
 	LINVMAX=5.d0*MAX(NEFFMIN*SIGMAMAX,NEFFMAX*SIGMAMIN)
+	if(linvmax.eq.0.d0) return
 
 	DO 333 I=1,1000000
 	 DELTAT=DELTAT-LOG(PYR(0))/LINVMAX
@@ -5757,6 +6337,30 @@ C--calculate upper limit for density*cross section
 	END
 
 
+	integer function poissonian(lambda)
+	implicit none
+	integer n
+	double precision lambda,disc,p,pyr,u,v,pi
+	data pi/3.141592653589793d0/
+	
+	if (lambda.gt.745.d0) then
+	  u = pyr(0);
+	  v = pyr(0);
+	  poissonian = 
+     &	int(sqrt(lambda)*sqrt(-2.*log(u))*cos(2.*pi*v)+lambda)
+	else
+	 disc=exp(-lambda)
+	 p=1.d0
+	 n=0	
+ 800   p = p*pyr(0)
+	 if (p.gt.disc) then
+	   n = n+1
+	   goto 800
+	 endif
+	 poissonian=n
+	endif
+	end
+
 
 ***********************************************************************
 ***	  function ishadron
@@ -5796,7 +6400,19 @@ C--local variables
       ENDIF 
       END
 
-
+***********************************************************************
+***	  function islepton
+***********************************************************************
+      LOGICAL FUNCTION ISLEPTON(ID)
+      IMPLICIT NONE
+C--   local variables
+      INTEGER ID
+      IF((ABS(ID).EQ.11).OR.(ABS(ID).EQ.13).OR.(ABS(ID).EQ.15)) THEN
+         ISLEPTON=.TRUE.
+      ELSE
+         ISLEPTON=.FALSE.
+      ENDIF
+      END
       
 ***********************************************************************
 ***	  function isparton
@@ -5885,6 +6501,7 @@ C--local variables
 	else 
         isprimhadron=.false.
 	endif
+	if (k(l,1).eq.17) isprimhadron=.true.
 	end
 
 
@@ -6020,7 +6637,7 @@ C--colour index common block
 ***********************************************************************
 ***	  subroutine converttohepmc
 ***********************************************************************
-	SUBROUTINE CONVERTTOHEPMC(J,EVNUM,PID)
+	SUBROUTINE CONVERTTOHEPMC(J,EVNUM,PID,beam1,beam2)
 	IMPLICIT NONE
       COMMON/PYJETS/N,NPAD,K(23000,5),P(23000,5),V(23000,5)
 	INTEGER N,NPAD,K
@@ -6036,30 +6653,38 @@ C--Parameter common block
       LOGICAL ANGORD,SCATRECOIL,ALLHAD,compress
 C--organisation of event record
 	common/evrecord/nsim,npart,offset,hadrotype,sqrts,collider,hadro,
-     &shorthepmc
+     &shorthepmc,channel,isochannel
 	integer nsim,npart,offset,hadrotype
 	double precision sqrts
-	character*4 collider
+	character*4 collider,channel
+	character*2 isochannel
 	logical hadro,shorthepmc
+C--extra storage for scattering centres before interactions
+      common/storescatcen/nscatcen,maxnscatcen,scatflav(10000),
+     &scatcen(10000,5),writescatcen,writedummies
+	integer nscatcen,maxnscatcen,scatflav
+	double precision scatcen
+	logical writescatcen,writedummies
 C--local variables
 	INTEGER EVNUM,PBARCODE,VBARCODE,CODELIST(25000),I,PID,NSTART,
      &NFIRST,NVERTEX,NTOT,J,CODEFIRST
-      DOUBLE PRECISION mproton,centr,getcentrality
+      DOUBLE PRECISION mproton,mneutron,pdummy,pscatcen
       LOGICAL ISHADRON,ISDIQUARK,ISPARTON,isprimhadron,isprimstring,
      &issecstring
-	data mproton/0.938/
-  
+	character*2 beam1,beam2
+	data mproton/0.9383/
+	data mneutron/0.9396/
+	data pdummy/1.d-6/  
+	
  5000 FORMAT(A2,I10,I3,3E14.6,2I2,I6,4I2,E14.6)
  5100 FORMAT(A2,2E14.6)
- 5200 FORMAT(A2,9I2,4E14.6)
+ 5200 FORMAT(A2,6I7,2I2,1I7,4E14.6)
  5300 FORMAT(A2,2I2,5E14.6,2I2)
  5400 FORMAT(A2,I6,6I2,I6,I2)
  5500 FORMAT(A2,I6,I6,5E14.6,3I2,I6,I2)
 
 	PBARCODE=0
 	VBARCODE=0
-
-	centr = getcentrality()
 
 	if (shorthepmc) then
 C--short output
@@ -6072,18 +6697,18 @@ C--short output
         ENDIF
 	  nfirst = 0
 	  do 131 i=1,N
-	    if ((k(i,1).lt.10).and.(.not.(allhad.and.(k(i,1).eq.3)))) 
+	    if (((k(i,1).lt.6).or.(k(i,1).eq.17)))
      &	nfirst = nfirst+1
  131	  continue
+	  if(writescatcen) NFIRST=NFIRST+nscatcen
+	  if(writedummies) NFIRST=NFIRST+nscatcen
 
-	  NFIRST=NFIRST
-
-	  WRITE(J,5000)'E ',EVNUM,-1,0.d0,0.d0,0.d0,0,0,1,1,2,0,1,
+	  WRITE(J,5000)'E ',EVNUM,-1,0.d0,0.d0,0.d0,0,0,NVERTEX,1,2,0,1,
      &PARI(10)
 	  WRITE(J,'(A2,I2,A5)')'N ',1,'"0"' 
 	  WRITE(J,'(A)')'U GEV MM'
 	  WRITE(J,5100)'C ',PARI(1)*1.d9,0.d0
-	  WRITE(J,5200)'H ',0,0,0,0,0,0,0,0,0,centr,0.d0,0.d0,0.d0
+  	  WRITE(J,5200)'H ',0,0,0,0,0,0,0,0,0,0.d0,0.d0,0.d0,0.d0
 	  WRITE(J,5300)'F ',0,0,-1.d0,-1.d0,-1.d0,-1.d0,-1.d0,0,0
 C--write out vertex line	  
 	  IF(COLLIDER.EQ.'EEJJ')THEN
@@ -6102,17 +6727,52 @@ C--write out vertex line
 	    WRITE(J,5400)'V ',-3,0,0,0,0,0,0,NFIRST,0
         ELSE
 	    WRITE(J,5400)'V ',-1,0,0,0,0,0,2,NFIRST,0
-	    WRITE(J,5500)'P ',1,2212,0.d0,0.d0,
+	    if (beam1.eq.'p+') then
+	  	WRITE(J,5500)'P ',1,2212,0.d0,0.d0,
      &	sqrt(sqrts**2/4.-mproton**2),sqrts/2.,mproton,2,0,0,-1,0
-	    WRITE(J,5500)'P ',2,2212,0.d0,0.d0,
+	    else
+	  	WRITE(J,5500)'P ',1,2112,0.d0,0.d0,
+     &	sqrt(sqrts**2/4.-mneutron**2),sqrts/2.,mneutron,2,0,0,-1,0
+	    endif
+	    if (beam2.eq.'p+') then
+	      WRITE(J,5500)'P ',2,2212,0.d0,0.d0,
      &	-sqrt(sqrts**2/4.-mproton**2),sqrts/2.,mproton,2,0,0,-1,0
+	    else
+	      WRITE(J,5500)'P ',2,2112,0.d0,0.d0,
+     &	-sqrt(sqrts**2/4.-mneutron**2),sqrts/2.,mneutron,2,0,0,-1,0
+	    endif
 	  ENDIF
-C--write out particle lines
-	  do 132 i=3,N
-	    if((k(i,1).lt.10).and.(.not.(allhad.and.(k(i,1).eq.3)))) then
+C--write out scattering centres
+	if(writescatcen) then
+	    do 133 i=1,nscatcen
 	      pbarcode=pbarcode+1
-	      WRITE(J,5500)'P ',PBARCODE,K(I,2),P(I,1),P(I,2),P(I,3),
+	      WRITE(J,5500)'P ',pbarcode,scatflav(i),scatcen(I,1),
+     &	  scatcen(I,2),scatcen(I,3),scatcen(I,4),scatcen(I,5),
+     &	  3,0,0,0,0
+ 133	    continue
+	  endif	  
+C--write out dummy particles
+	  if(writedummies) then
+	    do 135 i=1,nscatcen
+	      pbarcode=pbarcode+1
+	      pscatcen=sqrt(scatcen(I,1)**2+scatcen(I,2)**2+
+     &		scatcen(I,3)**2)
+	      WRITE(J,5500)'P ',pbarcode,111,pdummy*scatcen(I,1)/pscatcen,
+     &	  pdummy*scatcen(I,2)/pscatcen,pdummy*scatcen(I,3)/pscatcen,
+     &	  pdummy,0.d0,1,0,0,0,0
+ 135	    continue
+	  endif	  
+C--write out particle lines
+	  do 132 i=1,N
+	    if(((k(i,1).lt.6).or.(k(i,1).eq.17))) then
+	      pbarcode=pbarcode+1
+		if((k(i,1).eq.3).or.(k(i,1).eq.5)) then
+	        WRITE(J,5500)'P ',PBARCODE,K(I,2),P(I,1),P(I,2),P(I,3),
+     &		P(I,4),P(I,5),4,0,0,0,0
+	      else
+	        WRITE(J,5500)'P ',PBARCODE,K(I,2),P(I,1),P(I,2),P(I,3),
      &		P(I,4),P(I,5),1,0,0,0,0
+		endif
 	    endif
  132	  continue
 
@@ -6133,6 +6793,7 @@ C--hadronised events
 	      ENDIF
  123	    CONTINUE	 
  124	    CONTINUE	 
+	    nstart=0
 
           DO 126 I=NSTART+1,N
 	      IF(isprimhadron(i)) NFIRST=NFIRST+1
@@ -6141,14 +6802,15 @@ C--hadronised events
  126	    CONTINUE	 
  127	    CONTINUE	 
 
-	    NFIRST=NFIRST
+	    if(writescatcen) NFIRST=NFIRST+nscatcen
+	    if(writedummies) NFIRST=NFIRST+nscatcen
 
 	    WRITE(J,5000)'E ',EVNUM,-1,0.d0,0.d0,0.d0,0,0,NVERTEX,
      &1,2,0,1,PARI(10)
 	    WRITE(J,'(A2,I2,A5)')'N ',1,'"0"' 
 	    WRITE(J,'(A)')'U GEV MM'
 	    WRITE(J,5100)'C ',PARI(1)*1.d9,0.d0
-c	WRITE(J,5200)'H ',0,0,0,0,0,0,0,0,0,0.d0,0.d0,0.d0,0.d0
+	    WRITE(J,5200)'H ',0,0,0,0,0,0,0,0,0,0.d0,0.d0,0.d0,0.d0
 	    WRITE(J,5300)'F ',0,0,-1.d0,-1.d0,-1.d0,-1.d0,-1.d0,0,0
 
 C--write out vertex line	  
@@ -6175,13 +6837,44 @@ C--write out vertex line
 		WRITE(J,5400)'V ',VBARCODE,0,0,0,0,0,0,NFIRST,0
           ELSE
 	      WRITE(J,5400)'V ',-1,0,0,0,0,0,2,NFIRST,0
-		WRITE(J,5500)'P ',1,2212,0.d0,0.d0,
+	    if (beam1.eq.'p+') then
+	  	WRITE(J,5500)'P ',1,2212,0.d0,0.d0,
      &	sqrt(sqrts**2/4.-mproton**2),sqrts/2.,mproton,2,0,0,-1,0
-		WRITE(J,5500)'P ',2,2212,0.d0,0.d0,
+	    else
+	  	WRITE(J,5500)'P ',1,2112,0.d0,0.d0,
+     &	sqrt(sqrts**2/4.-mneutron**2),sqrts/2.,mneutron,2,0,0,-1,0
+	    endif
+	    if (beam2.eq.'p+') then
+	      WRITE(J,5500)'P ',2,2212,0.d0,0.d0,
      &	-sqrt(sqrts**2/4.-mproton**2),sqrts/2.,mproton,2,0,0,-1,0
+	    else
+	      WRITE(J,5500)'P ',2,2112,0.d0,0.d0,
+     &	-sqrt(sqrts**2/4.-mneutron**2),sqrts/2.,mneutron,2,0,0,-1,0
+	    endif
 	    ENDIF
        
 	    CODEFIRST=NFIRST+PBARCODE
+
+C--write out scattering centres
+	  if(writescatcen) then
+	    do 134 i=1,nscatcen
+	      pbarcode=pbarcode+1
+	      WRITE(J,5500)'P ',PBARCODE,scatflav(I),scatcen(I,1),
+     &	  scatcen(I,2),scatcen(I,3),scatcen(I,4),scatcen(I,5),
+     &	  3,0,0,0,0
+ 134	    continue
+	  endif	  
+C--write out dummy particles
+	  if(writedummies) then
+	    do 136 i=1,nscatcen
+	      pbarcode=pbarcode+1
+	      pscatcen=sqrt(scatcen(I,1)**2+scatcen(I,2)**2+
+     &		scatcen(I,3)**2)
+	      WRITE(J,5500)'P ',pbarcode,111,pdummy*scatcen(I,1)/pscatcen,
+     &	  pdummy*scatcen(I,2)/pscatcen,pdummy*scatcen(I,3)/pscatcen,
+     &	  pdummy,0.d0,1,0,0,0,0
+ 136	    continue
+	  endif	  
 
 C--first write out all particles coming directly from string or cluster decays
 	     DO 125 I=NSTART+1,N
@@ -6268,10 +6961,10 @@ C--partonic events
 	write(fid,*)'|                                 '//
      &'                                            |'
 	write(fid,*)'|                            '//
-     &'this is JEWEL 2.0.2                              |'
+     &'this is JEWEL 2.1.0                              |'
 	write(fid,*)'|                                 '//
      &'                                            |'
-	write(fid,*)'| Copyright Korinna C. Zapp (2013)'//
+	write(fid,*)'| Copyright Korinna C. Zapp (2016)'//
      &'  [Korinna.Zapp@cern.ch]                    |'
 	write(fid,*)'|                                 '//
      &'                                            |'
@@ -6281,15 +6974,28 @@ C--partonic events
      &'                                            |'
 	write(fid,*)'| The medium model was partly '//
      &'implemented by Jochen Klein                     |'
-	write(fid,*)'| [Jochen.Klein@cern.ch].         '//
-     &'                                            |'
+	write(fid,*)'| [Jochen.Klein@cern.ch]. Raghav '//
+     &'Kunnawalkam Elayavalli helped with the       |'
+	write(fid,*)'| implementation of the V+jet processes '//
+     &'[raghav.k.e@cern.ch].                 |'
 	write(fid,*)'|                                 '//
      &'                                            |'
 	write(fid,*)'| Please cite JHEP 1303 (2013) '//
      &'080 [arXiv:1212.1599] and optionally           |'
 	write(fid,*)'| EPJC C60 (2009) 617 [arXiv:0804.3568] '//
      &'for the physics and arXiv:1311.0048   |'
-	write(fid,*)'| for the code.                   '
+	write(fid,*)'| for the code. The reference for '//
+     &'V+jet processes is EPJC 76 (2016) no.12 695 |'
+       write(fid,*)'| [arXiv:1608.03099] and for recoil effects'//
+     &' it is arXiv:1707.01539.           |'
+	write(fid,*)'|                                 '//
+     &'                                            |'
+	write(fid,*)'| JEWEL contains code provided by '//
+     &'S. Zhang and J. M. Jing                     |'
+	write(fid,*)'| (Computation of Special Functions, '//
+     &'John Wiley & Sons, New York, 1996 and    |'
+	write(fid,*)'| http://jin.ece.illinois.edu) for '//
+     &'computing the exponential integral Ei(x).  |'
 	write(fid,*)'|                                 '//
      &'                                            |'
 	write(fid,*)'| JEWEL relies heavily on PYTHIA 6'//
@@ -6299,16 +7005,7 @@ C--partonic events
 	write(fid,*)'| official PYTHIA release and must'//
      &' not be used for anything else. Please      |'
 	write(fid,*)'| refer to results as "JEWEL+PYTHIA".'//
-     &'                                         |'//
-     &'                                            |'
-	write(fid,*)'|                                 '//
-     &'                                            |'
-	write(fid,*)'| JEWEL also uses code provided by'//
-     &'S. Zhang and J. M. Jing                     |'
-	write(fid,*)'| (Computation of Special Functions, '//
-     &'John Wiley & Sons, New York, 1996 and    |'
-	write(fid,*)'| http://jin.ece.illinois.edu) for '//
-     &'computing the exponential integral Ei(x).  |'
+     &'                                         |'
 	write(fid,*)'|                                 '//
      &'                                            |'
 	write(fid,*)'|_________________________________'//

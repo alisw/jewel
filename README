@@ -20,8 +20,9 @@ CONTENTS:
 1. REFERENCES
 -------------
 
-The manual with information on how to run JEWEL can be obtained from 
-arXiv:1311.0048.
+The manual with information on how to run JEWEL is distributed with the JEWEL 
+release and can be obtained from
+..................
 
 If you use this code for scientific work please cite the manual for the code and
 JHEP 1303 (2013) 080 [arXiv:1212.1599] and optionally EPJC C60 (2009) 617 
@@ -80,6 +81,7 @@ John Wiley & Sons, New York, 1996 and http://jin.ece.illinois.edu) for computing
 integral Ei(x).
 
 The medium model was partly implemented by Jochen Klein [Jochen.Klein@cern.ch].
+Raghav Kunnawalkam Elayavalli helped with the implementation of the V+jet processes [raghav.k.e@cern.ch].
 
 
 4. DISCLAIMER
@@ -91,4 +93,4 @@ scientiﬁc work provided proper reference is given.
 
 
 
-Copyright Korinna C. Zapp (2013) [Korinna.Zapp@cern.ch] 
+Copyright Korinna C. Zapp (2017) [Korinna.Zapp@cern.ch] 

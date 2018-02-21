@@ -1,16 +1,21 @@
 C+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-C++ Copyright (C) 2013 Korinna C. Zapp [Korinna.Zapp@cern.ch]       ++
+C++ Copyright (C) 2017 Korinna C. Zapp [Korinna.Zapp@cern.ch]       ++
 C++                                                                 ++
-C++ This file is part of JEWEL 2.0.2                                ++
+C++ This file is part of JEWEL 2.2.0                                ++
 C++                                                                 ++
 C++ The JEWEL homepage is jewel.hepforge.org                        ++
 C++                                                                 ++
-C++ The medium model was partly implemented by Jochen Klein         ++
+C++ The medium model was partly implemented by Jochen Klein.        ++
+C++ Raghav Kunnawalkam Elayavalli helped with the implementation    ++
+C++ of the V+jet processes.                                         ++
 C++                                                                 ++
-C++ Please follow the MCnet GUIDELINES and cite arXiv:1311.0048     ++
-C++ for the code and JHEP 1303 (2013) 080 [arXiv:1212.1599] and     ++
-C++ optionally EPJC C60 (2009) 617 [arXiv:0804.3568] for the        ++
-C++ physics.                                                        ++
+C++ Please follow the MCnet GUIDELINES and cite Eur.Phys.J. C74     ++
+C++ (2014) no.2, 2762 [arXiv:1311.0048] for the code and            ++
+C++ JHEP 1303 (2013) 080 [arXiv:1212.1599] and                      ++
+C++ optionally EPJC 60 (2009) 617 [arXiv:0804.3568] for the         ++
+C++ physics. The reference for V+jet processes is EPJC 76 (2016)    ++
+C++ no.12 695 [arXiv:1608.03099] and for recoil effects it is       ++
+C++ arXiv:1707.01539.
 C++                                                                 ++
 C++ JEWEL relies heavily on PYTHIA 6 for the event generation. The  ++
 C++ modified version of PYTHIA 6.4.25 that is distributed with      ++

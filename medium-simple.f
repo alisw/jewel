@@ -1,16 +1,21 @@
 C+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-C++ Copyright (C) 2013 Korinna C. Zapp [Korinna.Zapp@cern.ch]       ++
+C++ Copyright (C) 2017 Korinna C. Zapp [Korinna.Zapp@cern.ch]       ++
 C++                                                                 ++
-C++ This file is part of JEWEL 2.0.2                                ++
+C++ This file is part of JEWEL 2.2.0                                ++
 C++                                                                 ++
 C++ The JEWEL homepage is jewel.hepforge.org                        ++
 C++                                                                 ++
-C++ The medium model was partly implemented by Jochen Klein         ++
+C++ The medium model was partly implemented by Jochen Klein.        ++
+C++ Raghav Kunnawalkam Elayavalli helped with the implementation    ++
+C++ of the V+jet processes.                                         ++
 C++                                                                 ++
-C++ Please follow the MCnet GUIDELINES and cite arXiv:1311.0048     ++
-C++ for the code and JHEP 1303 (2013) 080 [arXiv:1212.1599] and     ++
-C++ optionally EPJC C60 (2009) 617 [arXiv:0804.3568] for the        ++
-C++ physics.                                                        ++
+C++ Please follow the MCnet GUIDELINES and cite Eur.Phys.J. C74     ++
+C++ (2014) no.2, 2762 [arXiv:1311.0048] for the code and            ++
+C++ JHEP 1303 (2013) 080 [arXiv:1212.1599] and                      ++
+C++ optionally EPJC 60 (2009) 617 [arXiv:0804.3568] for the         ++
+C++ physics. The reference for V+jet processes is EPJC 76 (2016)    ++
+C++ no.12 695 [arXiv:1608.03099] and for recoil effects it is       ++
+C++ arXiv:1707.01539.
 C++                                                                 ++
 C++ JEWEL relies heavily on PYTHIA 6 for the event generation. The  ++
 C++ modified version of PYTHIA 6.4.25 that is distributed with      ++
@@ -53,7 +58,7 @@ C++ that you include the source code of that other code when and as ++
 C++ the GNU GPL requires distribution of source code.               ++
 C+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-      SUBROUTINE MEDINIT(FILE,id,etam)
+      SUBROUTINE MEDINIT(FILE,id,etam,mass)
       IMPLICIT NONE
 C--medium parameters
       COMMON/MEDPARAM/CENTRMIN,CENTRMAX,BREAL,CENTR,RAU,NF
@@ -88,14 +93,12 @@ C--identifier of log file
       DATA D3/0.9d0/
       DATA ZETA3/1.2d0/
 C--local variables
-      INTEGER I,LUN,POS,IOS,id
+      INTEGER I,LUN,POS,IOS,id,mass
 	double precision etam
       CHARACTER*100 BUFFER,LABEL,tempbuf
 	CHARACTER*80 FILE
 	character firstchar
 	logical fileexist
-
-	boost = .true.
 
 	etamax2 = etam
 	logfid = id
@@ -111,12 +114,13 @@ C--default settings
       CENTRMIN=0.d0
       CENTRMAX=10.d0
       NF=3
-      A=208
+      A=mass
       N0=0.17d0
       D=0.54d0
       SIGMANN=6.2
 	MDFACTOR=0.45d0
 	MDSCALEFAC=0.9d0
+	boost = .true.
 
 C--read settings from file
 	write(logfid,*)
@@ -146,8 +150,6 @@ C--read settings from file
             READ(BUFFER,*,IOSTAT=IOS) CENTRMAX
           ELSE IF (LABEL=="NF") THEN
             READ(BUFFER,*,IOSTAT=IOS) NF
-          ELSE IF (LABEL=="A") THEN
-            READ(BUFFER,*,IOSTAT=IOS) A
           ELSE IF (LABEL=="N0") THEN
             READ(BUFFER,*,IOSTAT=IOS) N0
           ELSE IF (LABEL=="D") THEN
