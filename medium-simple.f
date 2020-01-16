@@ -250,7 +250,13 @@ C--pick an impact parameter
       getcentrality=centr
       end
 
-
+      double precision function getb()
+      implicit none
+      COMMON/MEDPARAM/CENTRMIN,CENTRMAX,BREAL,CENTR,RAU,NF
+      INTEGER NF
+      DOUBLE PRECISION CENTRMIN,CENTRMAX,BREAL,CENTR,RAU
+      getb=breal
+      end
 
       SUBROUTINE PICKVTX(X,Y)
       IMPLICIT NONE
