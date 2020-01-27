@@ -6733,17 +6733,17 @@ C--write out vertex line
 	    WRITE(J,5400)'V ',-1,0,0,0,0,0,2,NFIRST,0
 	    if (beam1.eq.'p+') then
 	  	WRITE(J,5500)'P ',1,2212,0.d0,0.d0,
-     &	sqrt(sqrts**2/4.-mproton**2),sqrts/2.,mproton,2,0,0,-1,0
+     &	sqrt(sqrts**2/4.-mproton**2),sqrts/2.,mproton,4,0,0,-1,0
 	    else
 	  	WRITE(J,5500)'P ',1,2112,0.d0,0.d0,
-     &	sqrt(sqrts**2/4.-mneutron**2),sqrts/2.,mneutron,2,0,0,-1,0
+     &	sqrt(sqrts**2/4.-mneutron**2),sqrts/2.,mneutron,4,0,0,-1,0
 	    endif
 	    if (beam2.eq.'p+') then
 	      WRITE(J,5500)'P ',2,2212,0.d0,0.d0,
-     &	-sqrt(sqrts**2/4.-mproton**2),sqrts/2.,mproton,2,0,0,-1,0
+     &	-sqrt(sqrts**2/4.-mproton**2),sqrts/2.,mproton,4,0,0,-1,0
 	    else
 	      WRITE(J,5500)'P ',2,2112,0.d0,0.d0,
-     &	-sqrt(sqrts**2/4.-mneutron**2),sqrts/2.,mneutron,2,0,0,-1,0
+     &	-sqrt(sqrts**2/4.-mneutron**2),sqrts/2.,mneutron,4,0,0,-1,0
 	    endif
 	  ENDIF
 C--write out scattering centres
