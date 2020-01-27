@@ -81,7 +81,10 @@ C+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
       getcentrality=-1.d0
       end
 
-
+      double precision function getb()
+      implicit none
+      getb=-1.d0
+      end
 
       SUBROUTINE PICKVTX(X,Y)
       IMPLICIT NONE

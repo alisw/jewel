@@ -6668,7 +6668,8 @@ C--extra storage for scattering centres before interactions
 C--local variables
 	INTEGER EVNUM,PBARCODE,VBARCODE,CODELIST(25000),I,PID,NSTART,
      &NFIRST,NVERTEX,NTOT,J,CODEFIRST
-      DOUBLE PRECISION mproton,mneutron,pdummy,pscatcen
+      DOUBLE PRECISION mproton,mneutron,pdummy,pscatcen,centr,
+     &getcentrality,b,getb
       LOGICAL ISHADRON,ISDIQUARK,ISPARTON,isprimhadron,isprimstring,
      &issecstring
 	character*2 beam1,beam2
@@ -6678,13 +6679,16 @@ C--local variables
 	
  5000 FORMAT(A2,I10,I3,3E14.6,2I2,I6,4I2,E14.6)
  5100 FORMAT(A2,2E14.6)
- 5200 FORMAT(A2,6I7,2I2,1I7,4E14.6)
+ 5200 FORMAT(A2,6I7,2I2,1I7,5E14.6)
  5300 FORMAT(A2,2I2,5E14.6,2I2)
  5400 FORMAT(A2,I6,6I2,I6,I2)
  5500 FORMAT(A2,I6,I6,5E14.6,3I2,I6,I2)
 
 	PBARCODE=0
 	VBARCODE=0
+
+	centr = getcentrality()*100.d0
+	b = getb()
 
 	if (shorthepmc) then
 C--short output
@@ -6708,7 +6712,7 @@ C--short output
 	  WRITE(J,'(A2,I2,A5)')'N ',1,'"0"' 
 	  WRITE(J,'(A)')'U GEV MM'
 	  WRITE(J,5100)'C ',PARI(1)*1.d9,0.d0
-  	  WRITE(J,5200)'H ',0,0,0,0,0,0,0,0,0,0.d0,0.d0,0.d0,0.d0
+	  WRITE(J,5200)'H ',0,0,0,0,0,0,0,0,0,b,0.d0,0.d0,0.d0,centr
 	  WRITE(J,5300)'F ',0,0,-1.d0,-1.d0,-1.d0,-1.d0,-1.d0,0,0
 C--write out vertex line	  
 	  IF(COLLIDER.EQ.'EEJJ')THEN
@@ -6729,17 +6733,17 @@ C--write out vertex line
 	    WRITE(J,5400)'V ',-1,0,0,0,0,0,2,NFIRST,0
 	    if (beam1.eq.'p+') then
 	  	WRITE(J,5500)'P ',1,2212,0.d0,0.d0,
-     &	sqrt(sqrts**2/4.-mproton**2),sqrts/2.,mproton,2,0,0,-1,0
+     &	sqrt(sqrts**2/4.-mproton**2),sqrts/2.,mproton,4,0,0,-1,0
 	    else
 	  	WRITE(J,5500)'P ',1,2112,0.d0,0.d0,
-     &	sqrt(sqrts**2/4.-mneutron**2),sqrts/2.,mneutron,2,0,0,-1,0
+     &	sqrt(sqrts**2/4.-mneutron**2),sqrts/2.,mneutron,4,0,0,-1,0
 	    endif
 	    if (beam2.eq.'p+') then
 	      WRITE(J,5500)'P ',2,2212,0.d0,0.d0,
-     &	-sqrt(sqrts**2/4.-mproton**2),sqrts/2.,mproton,2,0,0,-1,0
+     &	-sqrt(sqrts**2/4.-mproton**2),sqrts/2.,mproton,4,0,0,-1,0
 	    else
 	      WRITE(J,5500)'P ',2,2112,0.d0,0.d0,
-     &	-sqrt(sqrts**2/4.-mneutron**2),sqrts/2.,mneutron,2,0,0,-1,0
+     &	-sqrt(sqrts**2/4.-mneutron**2),sqrts/2.,mneutron,4,0,0,-1,0
 	    endif
 	  ENDIF
 C--write out scattering centres
@@ -6810,7 +6814,7 @@ C--hadronised events
 	    WRITE(J,'(A2,I2,A5)')'N ',1,'"0"' 
 	    WRITE(J,'(A)')'U GEV MM'
 	    WRITE(J,5100)'C ',PARI(1)*1.d9,0.d0
-	    WRITE(J,5200)'H ',0,0,0,0,0,0,0,0,0,0.d0,0.d0,0.d0,0.d0
+	    WRITE(J,5200)'H ',0,0,0,0,0,0,0,0,0,b,0.d0,0.d0,0.d0,centr
 	    WRITE(J,5300)'F ',0,0,-1.d0,-1.d0,-1.d0,-1.d0,-1.d0,0,0
 
 C--write out vertex line	  
